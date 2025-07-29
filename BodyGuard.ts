@@ -1,3 +1,12 @@
+/**
+ * Bodyguard script
+ * This script allows the player to spawn a bodyguard that follows them around.
+ * Press Key.K to spawn a bodyguard.
+ * The bodyguard will follow the player and enter their vehicle if they are in one.
+ * If the player is not in a vehicle, the bodyguard will walk alongside them.
+ * If the bodyguard is dead, it will be removed and a new one can be spawned.
+ */
+
 import {Key} from ".config/enums";
 import {addVec} from "./libs/utils";
 
