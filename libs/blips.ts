@@ -61,6 +61,38 @@ export const BlipColors = {
 }
 
 let blips: Blip[] = [];
+let charBlips = new Map<Char, Blip>();
+
+export function addBlipForChar(char: Char, color: number, name: string): Blip {
+    const blip = Blip.AddForChar(char)
+        .flash(true)
+        .changeColor(color)
+        .changeNameFromAscii(name);
+
+    charBlips.set(char, blip);
+    charBlipGarbageCollection();
+
+    return blip;
+}
+
+export function removeBlipForChar(char: Char): void {
+    const blip = charBlips.get(char);
+
+    if (blip && Blip.DoesExist(blip.valueOf() as number)) {
+        blip.remove();
+    }
+
+    charBlips.delete(char);
+    charBlipGarbageCollection()
+}
+
+function charBlipGarbageCollection() {
+    charBlips.forEach((blip, char) => {
+        if (!Char.DoesExist(char)) {
+            removeBlipForChar(char)
+        }
+    });
+}
 
 export function addTestBlip(node: any, color: number, name: string): Blip {
     if (!node) {

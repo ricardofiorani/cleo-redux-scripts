@@ -1,4 +1,4 @@
-export const Relationship = {
+export const RelationshipGroup = {
     Player: 0,
     Civillian_Male: 1,
     Civillian_Female: 2,
@@ -70,4 +70,13 @@ export const Relationship = {
     NetworkTeam_6: 68,
     NetworkTeam_7: 69,
     NetworkTeam_8: 70,
+} as const;
+
+export const RelationshipType = {
+    Companion: 0,
+    Respect: 1,
+    Like: 2,
+    Neutral: 3,
+    Dislike: 4,
+    Hate: 5
 } as const;

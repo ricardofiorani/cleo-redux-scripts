@@ -1,3 +1,5 @@
+import {getVehicleNameFromHash, vehicles} from "./vehicleList";
+
 export function addVec(v1: Vector3, v2: Vector3) {
     return {x: v1.x + v2.x, y: v1.y + v2.y, z: v1.z + v2.z};
 }
@@ -44,4 +46,41 @@ export function getETA(distance: number, speedMph: number): string {
     const etaRemainingSeconds = Math.floor(etaSeconds % 60);
 
     return `ETA: ${etaMinutes}m ${etaRemainingSeconds}s`;
+}
+
+export function isTouchingAnyCar(char: Char): boolean {
+    return getCarThatCharIsTouching(char) !== null;
+}
+
+/**
+ * GET_RANDOM_CAR_IN_SPHERE_NO_SAVE
+ * Number of parameters: 7
+ * Parameter #	Type	Description
+ * 1.	float	X-Coordinate
+ * 2.	float	Y-Coordinate
+ * 3.	float	Z-Coordinate
+ * 4.	float	Radius
+ * 5.	integer	Model hash (actually 0, but you can pick hash of car model)
+ * 6.	integer	Unknown (usually 1)
+ * 7.	integer	id of the car
+ * Return value:
+ * Type	Description
+ * None
+ * @param char
+ */
+
+export function getCarThatCharIsTouching(char: Char): Car | null {
+    const coords = char.getCoordinates();
+    const nearestCarId = native<int>("GET_RANDOM_CAR_IN_SPHERE_NO_SAVE", coords.x, coords.y, coords.z, 2.5, 0, 1);
+    const nearestCar = new Car(nearestCarId);
+
+    if(char.isTouchingVehicle(nearestCar)) {
+        log(`touching ${getVehicleNameFromHash(nearestCar.getModel() as number)} with id ${nearestCar.valueOf()}`);
+    }
+
+    if (Car.DoesExist(nearestCar)) {
+        return nearestCar;
+    }
+
+    return null;
 }

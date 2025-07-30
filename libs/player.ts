@@ -49,3 +49,8 @@ export function getPlayerCurrentVehicle(): Car | null {
 export function getPlayerCoords(): Vector3 {
     return getPlayerChar().getCoordinates();
 }
+
+export function isPlayerInAnyVehicle(): boolean {
+    const playerChar = getPlayerChar();
+    return playerChar.isInAnyCar() || playerChar.isInAnyHeli() || playerChar.isInAnyPlane() || playerChar.isInAnyBoat();
+}

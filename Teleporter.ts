@@ -3,7 +3,7 @@
  * This script allows the player to teleport to a waypoint set on the map by pressing the Numpad1 key.
  */
 
-import {Key} from ".config/gta_iv.enums";
+import {Key} from ".config/enums";
 import {getWaypointCoords, isWaypointSet} from "./libs/waypoint";
 import {getPlayer} from "./libs/player";
 

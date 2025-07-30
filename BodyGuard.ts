@@ -11,106 +11,152 @@
  */
 
 import {Key} from ".config/enums";
-import {addVec} from "./libs/utils";
+import {addVec, getDistanceBetweenTwoVectors} from "./libs/utils";
+import {giveCharWeapon, spawnChar, spawnCharInVehicle} from "./libs/char";
+import {RelationshipGroup, RelationshipType} from "./libs/relationship";
+import {getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyVehicle} from "./libs/player";
+import {Weapons} from "./libs/weapons";
+import {addBlipForChar, BlipColors, removeBlipForChar} from "./libs/blips";
+import {getFreePassengerSeat} from "./libs/vehicle";
 
-let bodyguard: Char;
+let group: Group;
+let garbageCollection: Char[] = [];
 
 while (true) {
     wait(100);
-    const player = new Player(Player.GetId());
+
+    if (!group) {
+        createGroup();
+    }
 
     if (Pad.IsGameKeyboardKeyPressed(Key.K)) {
         log("Key.K pressed");
         showTextBox("Spawning Bodyguard");
         log("Spawning Bodyguard...");
-        spawnBodyguard(player, true);
-        log("Bodyguard spawn function called");
+        spawnBodyguard();
         wait(1000);
     }
 
-    makeBodyguardFollowPlayer(player);
+    // Logic for bodyguard following the player
+    makeGroupFollowPlayer();
+
+    // Check if any is dead and remove them from the group
+    checkGroupMembers();
 }
 
-function spawnBodyguard(player: Player, destroyExisting: boolean = true) {
-    const pos = addVec(player.getChar().getCoordinates(), {x: 1.0, y: 1.0, z: 0});
 
-    //destroy existing bodyguard if it exists
-    if (bodyguard && destroyExisting) {
-        log("Destroying existing bodyguard");
-        bodyguard.delete();
+function checkGroupMembers() {
+    const removeMember = (member: Char) => {
+        removeBlipForChar(member);
+        member.markAsNoLongerNeeded();
+        garbageCollection = garbageCollection.filter(m => m !== member);
     }
 
-    // Create the bodyguard
-    if (player.getChar().isInAnyCar()) {
-        const currentVehicle = player.getChar().getCarIsUsing();
-        const seat = currentVehicle.isPassengerSeatFree(-1) ? -1 : 0;
-        log(
-            `Entering nearest car as passenger: ${currentVehicle.getModel()} at seat: ${seat}`
-        )
-        bodyguard = Char.CreateRandomAsPassenger(currentVehicle, seat);
-    } else {
-        bodyguard = Char.CreateRandom(pos.x, pos.y, pos.z);
-    }
-
-    if (bodyguard) {
-        log("Bodyguard spawned successfully");
-        showTextBox("Bodyguard spawned successfully");
-        log("Clearing bodyguard tasks and making it follow player");
-        bodyguard.clearTasks()
-
-        Task.FollowFootsteps(bodyguard, player.getChar() as int); //hack because it's not right
-        //native('GIVE_WEAPON_TO_CHAR', bodyguard, WeaponUzi, 9999, false); // Give bodyguard a weapon (e.g., pistol)
-        Blip.AddForChar(bodyguard).setAsFriendly(true)
-        // await asyncWait(5000);
-        // log("Making bodyguard combat hated targets in area");
-        // Task.CombatHatedTargetsInArea(bodyguard, pos.x, pos.y, pos.z, 1000);
-    } else {
-        log("Failed to spawn Bodyguard");
-        showTextBox("Failed to spawn Bodyguard");
-    }
+    garbageCollection.forEach(member => {
+        if(!Char.DoesExist(member) || member.isDead()){
+           removeMember(member);
+        } else if(getDistanceBetweenTwoVectors(getPlayerChar().getCoordinates(), member.getCoordinates()) > 100) {
+            log(`Member ${member.valueOf()} is too far away, removing from group`);
+            removeMember(member);
+        }
+    })
 }
 
-function makeBodyguardFollowPlayer(player: Player) {
-    if (!bodyguard || !Char.DoesExist(bodyguard)) return;
+function spawnBodyguard() {
+    const bodyguardSkin = "M_Y_BOUNCER_02";
+    let bodyguard: Char;
+    const currentVehicle = getPlayerCurrentVehicle();
 
-    if (bodyguard.isDead()) {
-        wait(1000);
-        log("Bodyguard is dead, removing it");
-        bodyguard.delete();
-        bodyguard = null;
+    if (!!currentVehicle) {
+        log("Player is in a vehicle, spawning bodyguard as passenger");
+        bodyguard = spawnCharInVehicle(bodyguardSkin, RelationshipGroup.Player, currentVehicle);
+    } else {
+        log("Player is not in a vehicle, spawning bodyguard on foot");
+        const pos = addVec(getPlayerChar().getCoordinates(), {x: 1.0, y: 1.0, z: 0});
+        bodyguard = spawnChar(bodyguardSkin, pos, RelationshipGroup.Player);
+    }
+
+    giveCharWeapon(bodyguard, Weapons.SMG_Uzi, 9999);
+
+    if (!bodyguard) {
+        log("Failed to spawn bodyguard");
         return;
     }
 
-    const playerChar = player.getChar();
-    const isPlayerInCar = playerChar.isInAnyCar();
-    const isBodyguardInCar = bodyguard.isInAnyCar();
-    const vehicle = playerChar.getCarIsUsing();
+    log("Bodyguard spawned successfully");
 
-    if (isPlayerInCar && !isBodyguardInCar) {
-        log("Making bodyguard enter car as passenger");
-        bodyguard.clearTasks();
+    bodyguard.setWillDoDrivebys(true)
+    bodyguard.setIsTargetPriority(true);
+    native<void>("SET_GROUP_CHAR_DUCKS_WHEN_AIMED_AT", bodyguard, false)
+    native<void>("SET_PED_DIES_WHEN_INJURED", bodyguard, true);
+    native<void>("SET_PED_PATH_MAY_USE_CLIMBOVERS", bodyguard, true);
+    native<void>("SET_PED_PATH_MAY_USE_LADDERS", bodyguard, true);
+    native<void>("SET_PED_PATH_MAY_DROP_FROM_HEIGHT", bodyguard, true);
 
-        const isDriverSeatFree = vehicle.isPassengerSeatFree(-1);
-        log(`Is driver seat free: ${isDriverSeatFree}`);
-        const isPlayerDriving = !isDriverSeatFree;
+    bodyguard.setRelationshipGroup(RelationshipGroup.Player);
+    bodyguard.setRelationship(RelationshipType.Companion, RelationshipGroup.Player);
+    bodyguard.setNotDamagedByRelationshipGroup(RelationshipGroup.Player, true);
+    bodyguard.setNeverLeavesGroup(true)
+    bodyguard.setAsMissionChar();
+    group.setMember(bodyguard);
 
-        if (isPlayerDriving) {
-            log("Player is driving the car, bodyguard will enter as passenger");
-            Task.EnterCarAsPassenger(bodyguard, vehicle, 10000, -2);
-        } else {
-            log("Player is not driving the car, bodyguard will enter as driver");
-            Task.EnterCarAsDriver(bodyguard, vehicle, 10000);
-            wait(10000)
-            Task.CarDriveWander(bodyguard, vehicle, 10000, 3);
-        }
+    log(`Bodyguard added to group, which now has ${group.getSize().pCount} members`);
 
-        // wait(10000); // wait for the bodyguard to enter the car
-    } else if (!isPlayerInCar && isBodyguardInCar) {
-        log("Making bodyguard leave car and follow player");
-        log(`isPlayerInCar: ${isPlayerInCar}, isBodyguardInCar: ${isBodyguardInCar}`);
-        bodyguard.clearTasks();
-        Task.LeaveAnyCar(bodyguard);
-        Task.FollowFootsteps(bodyguard, player.getChar() as int); //hack because it's not right
-        // wait(10000); // wait for the bodyguard to leave the car
+    if (!currentVehicle) {
+        Task.FollowFootsteps(bodyguard, getPlayerChar() as int)
+    } else {
+        Task.WarpCharIntoCarAsPassenger(bodyguard, currentVehicle, getFreePassengerSeat(currentVehicle));
     }
+
+    addBlipForChar(bodyguard, BlipColors.Green, `Bodyguard ${bodyguard.valueOf()}`);
+    garbageCollection.push(bodyguard);
+}
+
+function makeGroupFollowPlayer() {
+    if (getPlayerChar().isGettingInToACar() && !!getPlayerCurrentVehicle()) {
+        log("Player is getting into a car, bodyguard will enter as passenger");
+        const members: Char[] = getGroupMembers();
+
+        members.forEach(member => {
+            Task.EnterCarAsPassenger(member, getPlayerCurrentVehicle(), 5000, -2);
+            wait(5000);
+        })
+    } else if (!isPlayerInAnyVehicle()) {
+        const members: Char[] = getGroupMembers();
+
+        members.forEach(member => {
+            member.isInAnyCar() && Task.LeaveAnyCar(member) && wait(1000);
+        });
+    }
+}
+
+function getGroupMembers(): Char[] {
+    let members: Char[] = [];
+    const groupMembers = group.getSize().pCount;
+
+    for (let i = 0; i < groupMembers; i++) {
+        const member = group.getMember(i);
+        if (member && !member.isDead()) {
+            members.push(member);
+        }
+    }
+
+    return members;
+}
+
+function createGroup() {
+    const playerGroup = getPlayerChar().getGroupIndex()
+
+    if (!playerGroup) {
+        log('ERROR: Player has no group index, cannot spawn bodyguard');
+        wait(1000);
+        return;
+    }
+
+    group = new Group(playerGroup);
+    group.setLeader(getPlayerChar());
+    group.setFollowStatus(1);
+
+    // In case the script reloads, repopulate the garbage collection
+    garbageCollection = getGroupMembers();
 }
