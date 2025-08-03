@@ -16,6 +16,8 @@ import {getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyCar} from "./libs/p
 import {driveToCoords} from "./libs/vehicle";
 import {getWaypointCoords, isWaypointSet} from "./libs/waypoint";
 
+const debug = false;
+
 let teslaModeEnabled = false;
 let currentDestination: Vector3 = null;
 let nextDrivingPointBlip: Blip | null = null;
@@ -23,6 +25,10 @@ let nextDrivingPointBlip: Blip | null = null;
 const drivingSpeed = 40; // Speed in miles
 const obeyLaws = true; // Set to false if you want the vehicle to ignore traffic laws
 const disableWhenNotInCar = false; // If true, the mode will disable itself when the player is not in a car
+
+// For calculating ETA
+const recentSpeeds: number[] = [];
+const MAX_RECENT_SPEEDS = 10;
 
 while (true) {
     wait(100);
@@ -94,7 +100,7 @@ while (true) {
     )
 
     // If the player is close enough to the destination, we will stop the self-drive logic
-    if (distanceToDestination <= 20) {
+    if (distanceToDestination <= 40) {
         showTextBox("You have arrived at your destination");
         cleanupNextDrivingPointBlip();
         currentDestination = null;
@@ -116,15 +122,17 @@ while (true) {
 }
 
 function sendDriverTo(currentDriver: Char, currentVehicle: Car, destination: Vector3) {
+    recordSpeed(currentVehicle.getSpeed());
+
     const distanceToDestination = getDistanceBetweenTwoVectors(
         getPlayerChar().getCoordinates(),
         destination
     );
-    const eta = getETA(distanceToDestination, currentVehicle.getSpeed());
+    const eta = getETA(distanceToDestination, getAverageSpeed());
     log(`Distance to destination ${distanceToDestination.toFixed(0)} meters. ${eta}`);
 
     driveToCoords(currentDriver, currentVehicle, destination, drivingSpeed, obeyLaws);
-    updateNextDrivingPointBlip(destination);
+    debug && updateNextDrivingPointBlip(destination); // Debugging blip
     wait(10000); // check again every 10 seconds
 }
 
@@ -178,4 +186,20 @@ function freeVehicleDrivers() {
             Task.CarDriveWander(driver, currentVehicle, 10000, 1);
         }
     }
+}
+
+
+function recordSpeed(speed: number) {
+    recentSpeeds.push(speed);
+    if (recentSpeeds.length > MAX_RECENT_SPEEDS) {
+        recentSpeeds.shift(); // FIFO
+    }
+}
+
+function getAverageSpeed(): number {
+    if (recentSpeeds.length === 0) {
+        return drivingSpeed * 0.44704; // mph to m/s fallback
+    }
+    const sum = recentSpeeds.reduce((a, b) => a + b, 0);
+    return sum / recentSpeeds.length;
 }

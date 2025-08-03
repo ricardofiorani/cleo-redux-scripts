@@ -1,7 +1,13 @@
 import {getVehicleNameFromHash, vehicles} from "./vehicleList";
+import {getPlayer, getPlayerChar} from "./player";
+import {Bone} from "./bone";
 
 export function addVec(v1: Vector3, v2: Vector3) {
     return {x: v1.x + v2.x, y: v1.y + v2.y, z: v1.z + v2.z};
+}
+
+export function scaleVec(vec: Vector3, scalar: number): Vector3 {
+    return { x: vec.x * scalar, y: vec.y * scalar, z: vec.z * scalar };
 }
 
 export function loadModel(modelId: number) {
@@ -74,7 +80,7 @@ export function getCarThatCharIsTouching(char: Char): Car | null {
     const nearestCarId = native<int>("GET_RANDOM_CAR_IN_SPHERE_NO_SAVE", coords.x, coords.y, coords.z, 2.5, 0, 1);
     const nearestCar = new Car(nearestCarId);
 
-    if(char.isTouchingVehicle(nearestCar)) {
+    if (char.isTouchingVehicle(nearestCar)) {
         log(`touching ${getVehicleNameFromHash(nearestCar.getModel() as number)} with id ${nearestCar.valueOf()}`);
     }
 
@@ -83,4 +89,44 @@ export function getCarThatCharIsTouching(char: Char): Car | null {
     }
 
     return null;
+}
+
+export function getCharGettingTargetedByPlayer(): Char | null {
+    if (!getPlayer().isTargettingAnything()) {
+        return null; // Player is not targeting anything
+    }
+
+    const pos = getPlayerChar().getCoordinates();
+    // Exponentially search for a character in a 3D area around the character's position
+    let currentRadius = 5;
+    let maxRadius = 500;
+
+    while (currentRadius <= maxRadius) {
+        const foundChar = World.GetRandomCharInAreaOffsetNoSave(
+            pos.x, pos.y, pos.z,
+            currentRadius, currentRadius, currentRadius
+        );
+
+        if (foundChar && getPlayer().isTargettingChar(foundChar)) {
+            log(`Found character with ID: ${foundChar.valueOf()} within radius ${currentRadius}`);
+            return foundChar;
+        }
+
+        currentRadius += 0.1; // Increase the search radius
+        wait(100);
+    }
+
+    log(`No character found within the maximum search radius of ${maxRadius} units.`);
+    return null; // No character found within the search radius
+}
+
+export function addParticleFXToChar(playerChar: Char, fxName: string, bone: Bone): number {
+    log(`Adding particle effect ${fxName} to character with ID: ${playerChar.valueOf()} at bone: ${bone}`);
+
+    return native<int>("START_PTFX_ON_PED_BONE", fxName, getPlayerChar(), 0, 0, 0, 0, 0, 0, bone, 1.0)
+}
+
+
+export function stopParticleFxOnChar(particlesPointer: number): void {
+    native("STOP_PTFX", particlesPointer)
 }

@@ -53,19 +53,46 @@ function checkGroupMembers() {
     }
 
     garbageCollection.forEach(member => {
-        if(!Char.DoesExist(member) || member.isDead()){
-           removeMember(member);
-        } else if(getDistanceBetweenTwoVectors(getPlayerChar().getCoordinates(), member.getCoordinates()) > 100) {
+        if (!Char.DoesExist(member) || member.isDead()) {
+            removeMember(member);
+        } else if (getDistanceBetweenTwoVectors(getPlayerChar().getCoordinates(), member.getCoordinates()) > 100) {
             log(`Member ${member.valueOf()} is too far away, removing from group`);
             removeMember(member);
         }
     })
 }
 
+let lastSkinUsedIndex: number = 0;
+log(`BodyGuard script loaded and lastSkinUsedIndex initialized to ${lastSkinUsedIndex}`);
+
+function getRandomSkin(): string {
+    const listOfSkins = [
+        // "M_Y_BOUNCER_01",
+        // "M_Y_BOUNCER_02",
+        "IG_JohnnyBiker",
+        "IG_LUIS",
+        "M_Y_DRUG_01",
+    ];
+
+    return listOfSkins[Math.floor(Math.random() * listOfSkins.length)];
+
+    // lastSkinUsedIndex = (lastSkinUsedIndex + 1) % listOfSkins.length;
+    //
+    // return listOfSkins[lastSkinUsedIndex];
+}
+
 function spawnBodyguard() {
-    const bodyguardSkin = "M_Y_BOUNCER_02";
-    let bodyguard: Char;
     const currentVehicle = getPlayerCurrentVehicle();
+
+    // can't spawn in car if there's no seat available
+    if (currentVehicle && getFreePassengerSeat(currentVehicle) === -2) {
+        log("No free passenger seat available in the current vehicle, cannot spawn bodyguard");
+        showTextBox("No free passenger seat available in the current vehicle, cannot spawn bodyguard");
+        return;
+    }
+
+    const bodyguardSkin = getRandomSkin();
+    let bodyguard: Char;
 
     if (!!currentVehicle) {
         log("Player is in a vehicle, spawning bodyguard as passenger");
@@ -113,17 +140,20 @@ function spawnBodyguard() {
 }
 
 function makeGroupFollowPlayer() {
+    const members: Char[] = getGroupMembers();
+
+    if(!members || members.length === 0) {
+        return;
+    }
+
     if (getPlayerChar().isGettingInToACar() && !!getPlayerCurrentVehicle()) {
         log("Player is getting into a car, bodyguard will enter as passenger");
-        const members: Char[] = getGroupMembers();
 
         members.forEach(member => {
             Task.EnterCarAsPassenger(member, getPlayerCurrentVehicle(), 5000, -2);
             wait(5000);
         })
     } else if (!isPlayerInAnyVehicle()) {
-        const members: Char[] = getGroupMembers();
-
         members.forEach(member => {
             member.isInAnyCar() && Task.LeaveAnyCar(member) && wait(1000);
         });

@@ -1,2 +1,5 @@
 .config
 .idea
+CLEO_PLUGINS
+CLEO_TEXT
+!CLEO_TEXT/.gitkeep
