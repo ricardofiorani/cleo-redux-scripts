@@ -1,14 +1,52 @@
-import {Key} from ".config/enums";
+import {Key} from "./.config/enums";
 import {getPlayer, getPlayerChar} from "./libs/player";
 import {applyForce} from "./libs/physics";
 import {addParticleFXToChar, stopParticleFxOnChar} from "./libs/utils";
 import {Bone} from "./libs/bone";
+import {CameraAssistant} from "./libs/camera";
 
 let forceStrength = 60;
 let particlesPointer;
 let isSlowMoEnabled = false;
 
 log(JSON.stringify(Camera, null, 2));
+
+const disableSlowMo = (disableInvincibility: boolean) => {
+    if(particlesPointer) {
+        stopParticleFxOnChar(particlesPointer);
+        particlesPointer = null;
+        log("Particle effect stopped and pointer reset.");
+    }
+
+    Clock.SetTimeScale(1.0);
+    getPlayerChar().setGravity(1.0);
+    getPlayerChar().setMoveAnimSpeedMultiplier(1.0);
+    native("SET_TIMECYCLE_MODIFIER", "NORMAL");
+    disableInvincibility && getPlayerChar().setInvincible(false);
+    CameraAssistant.GetGameCam().SetMotionBlur(false);
+
+    wait(50);
+    isSlowMoEnabled = false;
+}
+const enableSlowMo = (makeInvincible: boolean) => {
+    // !particlesPointer && (() => {
+    //     particlesPointer = addParticleFXToChar(getPlayerChar(), "water_carwash_drips", Bone.Head)
+    //     if (particlesPointer === 0) {
+    //         log("Failed to add particle effect to player character");
+    //     } else {
+    //         log(`Particle effect added with pointer: ${particlesPointer}`);
+    //     }
+    // })();
+    Clock.SetTimeScale(0.1);
+    getPlayerChar().setGravity(0.1);
+    getPlayerChar().setMoveAnimSpeedMultiplier(5);
+    native("SET_TIMECYCLE_MODIFIER", "harlemprojects");
+    makeInvincible && getPlayerChar().setInvincible(true);
+    CameraAssistant.GetGameCam().SetMotionBlur(true)
+
+    wait(50);
+    isSlowMoEnabled = true;
+}
 
 while (true) {
     wait(100);
@@ -32,44 +70,17 @@ while (true) {
 }
 
 function vehiclePhysicsControl(currentVehicle: Car, forceStrength: number) {
+    if(isSlowMoEnabled) {
+        disableSlowMo(true);
+    }
+
     applyForce(currentVehicle, false, forceStrength);
 }
 
 function flashMode(playerChar: Char, forceStrength: number) {
-    const disableSlowMo = (disableInvincibility: boolean) => {
-        if(particlesPointer) {
-            stopParticleFxOnChar(particlesPointer);
-            particlesPointer = null;
-            log("Particle effect stopped and pointer reset.");
-        }
+    const isRagdollOrAir = playerChar.isRagdoll() || playerChar.isInAir();
 
-        Clock.SetTimeScale(1.0);
-        playerChar.setGravity(1.0);
-        playerChar.setMoveAnimSpeedMultiplier(1.0);
-        native("SET_TIMECYCLE_MODIFIER", "NORMAL");
-        disableInvincibility && playerChar.setInvincible(false);
-
-        wait(50);
-    }
-    const enableSlowMo = (disableInvincibility: boolean) => {
-        !particlesPointer && (() => {
-            particlesPointer = addParticleFXToChar(playerChar, "water_carwash_drips", Bone.Head)
-            if (particlesPointer === 0) {
-                log("Failed to add particle effect to player character");
-            } else {
-                log(`Particle effect added with pointer: ${particlesPointer}`);
-            }
-        })();
-        Clock.SetTimeScale(0.1);
-        playerChar.setGravity(0.1);
-        playerChar.setMoveAnimSpeedMultiplier(5);
-        native("SET_TIMECYCLE_MODIFIER", "harlemprojects");
-        disableInvincibility && playerChar.setInvincible(true);
-
-        wait(50);
-    }
-
-    if(playerChar.isRagdoll()){
+    if(isRagdollOrAir){
         disableSlowMo(false);
         return;
     }
@@ -80,10 +91,8 @@ function flashMode(playerChar: Char, forceStrength: number) {
     // If targeting or force was applied, make it slow motion
     if (getPlayer().isTargettingAnything() || wasForceApplied) {
         enableSlowMo(false);
-        isSlowMoEnabled = true;
     } else {
-        disableSlowMo(!playerChar.isRagdoll());
-        isSlowMoEnabled = false;
+        disableSlowMo(true);
     }
 }
 

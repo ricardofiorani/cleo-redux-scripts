@@ -21,11 +21,6 @@ while (true) {
             getPlayerChar().clearTasks();
             getPlayerChar().clearSecondaryTask();
             getPlayerChar().setKeepTask(false);
-
-            if (isPlayerDrivingAnyCar()) {
-                player.getChar().setInvincible(false);
-                Task.LeaveAnyCar(player.getChar());
-            }
         } else {
             log("Numpad Enter pressed - Starting pedestrian mode");
             showTextBox("Starting pedestrian mode");

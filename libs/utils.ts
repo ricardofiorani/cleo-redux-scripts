@@ -18,6 +18,14 @@ export function loadModel(modelId: number) {
     }
 }
 
+export function loadAnims(animsGroup: string) {
+    native("REQUEST_ANIMS", animsGroup);
+
+    while (!native<boolean>("HAVE_ANIMS_LOADED", animsGroup)) {
+        wait(100);
+    }
+}
+
 export function getDistanceBetweenTwoVectors(a: Vector3, b: Vector3): number {
     const dx = a.x - b.x;
     const dy = a.y - b.y;
@@ -42,16 +50,26 @@ export function getStreetNameFromCoords(coords: Vector3): string {
     return streetName1.length === 0 ? streetName0 : `${streetName0}, ${streetName1}`;
 }
 
-export function getETA(distance: number, speedMph: number): string {
-    const speedMps = speedMph * 0.44704; // Convert mph to meters per second
+type ETAResult = {
+    seconds: number,
+    toString: () => string
+}
 
-    if (speedMps <= 0) return "ETA: ∞";
+export function getETA(distance: number, speedMph: number): ETAResult {
+    const speedMps = speedMph * 0.44704; // mph → m/s
 
-    const etaSeconds = distance / speedMps;
-    const etaMinutes = Math.floor(etaSeconds / 60);
-    const etaRemainingSeconds = Math.floor(etaSeconds % 60);
+    const seconds =
+        speedMps > 0 ? distance / speedMps : Infinity;
 
-    return `ETA: ${etaMinutes}m ${etaRemainingSeconds}s`;
+    return {
+        seconds,
+        toString() {
+            if (!isFinite(seconds)) return "ETA: ∞";
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = Math.floor(seconds % 60);
+            return `ETA: ${minutes}m ${remainingSeconds}s`;
+        }
+    };
 }
 
 export function isTouchingAnyCar(char: Char): boolean {
@@ -67,25 +85,52 @@ export function isTouchingAnyCar(char: Char): boolean {
  * 3.	float	Z-Coordinate
  * 4.	float	Radius
  * 5.	integer	Model hash (actually 0, but you can pick hash of car model)
- * 6.	integer	Unknown (usually 1)
+ * 6.	integer	Include mission cars (usually 1)
  * 7.	integer	id of the car
  * Return value:
  * Type	Description
  * None
  * @param char
+ * @param radius
  */
-
-export function getCarThatCharIsTouching(char: Char): Car | null {
+export function getNearestCarInRadius(char: Char, radius: number): Car | null {
     const coords = char.getCoordinates();
-    const nearestCarId = native<int>("GET_RANDOM_CAR_IN_SPHERE_NO_SAVE", coords.x, coords.y, coords.z, 2.5, 0, 1);
-    const nearestCar = new Car(nearestCarId);
+    const carId = native<int>(
+        "GET_RANDOM_CAR_IN_SPHERE_NO_SAVE",
+        coords.x, coords.y, coords.z,
+        radius,
+        0, // model hash filter
+        1  // include mission cars
+    );
 
-    if (char.isTouchingVehicle(nearestCar)) {
-        log(`touching ${getVehicleNameFromHash(nearestCar.getModel() as number)} with id ${nearestCar.valueOf()}`);
+    const car = new Car(carId);
+    return Car.DoesExist(car) ? car : null;
+}
+
+/**
+ * Finds the nearest car to a character, expanding the search radius until found.
+ */
+export function getNearestCarToChar(char: Char, startRadius = 2.5, maxRadius = 50, step = 2.5): Car | null {
+    let radius = startRadius;
+    let car: Car | null = null;
+
+    while (radius <= maxRadius && !car) {
+        car = getNearestCarInRadius(char, radius);
+        radius += step;
     }
 
-    if (Car.DoesExist(nearestCar)) {
-        return nearestCar;
+    return car;
+}
+
+/**
+ * Gets the car the character is touching, default radius small for accuracy.
+ */
+export function getCarThatCharIsTouching(char: Char, radius = 2.5): Car | null {
+    const car = getNearestCarInRadius(char, radius);
+
+    if (car && char.isTouchingVehicle(car)) {
+        log(`Touching ${getVehicleNameFromHash(car.getModel() as number)} with id ${car.valueOf()}`);
+        return car;
     }
 
     return null;
@@ -114,6 +159,28 @@ export function getCharGettingTargetedByPlayer(): Char | null {
 
         currentRadius += 0.1; // Increase the search radius
         wait(100);
+    }
+
+    log(`No character found within the maximum search radius of ${maxRadius} units.`);
+    return null; // No character found within the search radius
+}
+
+export function getNearestCharFromArea(coords: Vector3, maxRadius: number = 500): Char | null {
+    let startingRadius = 5;
+
+    while (startingRadius <= maxRadius) {
+        const foundChar = World.GetRandomCharInAreaOffsetNoSave(
+            coords.x, coords.y, coords.z,
+            startingRadius, startingRadius, startingRadius
+        );
+
+        if (foundChar && foundChar.valueOf() != 0) {
+            log(`Found character with ID: ${foundChar.valueOf()} within radius ${startingRadius}`);
+            return foundChar;
+        }
+
+        startingRadius += 2; // Increase the search radius
+        wait(10);
     }
 
     log(`No character found within the maximum search radius of ${maxRadius} units.`);

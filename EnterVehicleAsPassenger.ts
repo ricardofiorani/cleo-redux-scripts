@@ -1,30 +1,27 @@
 /**
  * Enter a vehicle as a passenger.
  * This script allows the player to toggle a mode where they can enter vehicles as passengers.
- * Press G to toggle the mode.
- * If the mode is enabled, the player will enter vehicles as a passenger when they attempt to get in.
+ * Press G to enter the nearest car in the passenger seat.
  */
 
 import {Key} from ".config/enums";
 import {getPlayerChar, isPlayerInAnyCar} from "./libs/player";
 import {getFreePassengerSeat} from "./libs/vehicle";
-
-let isEnterVehicleAsPassengerEnabled = false;
+import {getNearestCarToChar} from "./libs/utils";
 
 while(true) {
     wait(100);
 
     if(Pad.IsGameKeyboardKeyPressed(Key.G) && !isPlayerInAnyCar()) {
-        isEnterVehicleAsPassengerEnabled = !isEnterVehicleAsPassengerEnabled;
-        showTextBox(`Passenger mode: ${isEnterVehicleAsPassengerEnabled}`);
-        log(`Passenger mode: ${isEnterVehicleAsPassengerEnabled}`);
-        wait(1000); // Prevents rapid toggling
-    }
-
-    if (getPlayerChar().isGettingInToACar() && isEnterVehicleAsPassengerEnabled) {
-        log("Player is getting in to a car");
         // Get the car the player is trying to enter
-        const nearestCar = getPlayerChar().getCarIsUsing();
+        const nearestCar = getNearestCarToChar(getPlayerChar());
+
+        if (!nearestCar) {
+            log("No car found nearby.");
+            showTextBox("No car found nearby.");
+            continue; // No car found, skip this iteration
+        }
+
         log(`Nearest car: ${nearestCar.getModel()}`);
         getPlayerChar().clearTasks().clearSecondaryTask();
 
@@ -35,6 +32,6 @@ while(true) {
 
         // Enter a car as passenger
         Task.EnterCarAsPassenger(getPlayerChar(), nearestCar, 5000, freeSeatIndex);
-        wait(5000);
+        wait(1000);
     }
 }

@@ -10,20 +10,25 @@
 
 import {Key} from ".config/enums";
 import {BlipColors, cleanupTestBlips, createBlip} from "./libs/blips";
-import {getCarThatCharIsTouching, getDistanceBetweenTwoVectors, getETA, isTouchingAnyCar} from "./libs/utils";
+import {
+    getCarThatCharIsTouching,
+    getDistanceBetweenTwoVectors,
+    getETA,
+    isTouchingAnyCar,
+} from "./libs/utils";
 import {getDriveableCarNodeFromCoords} from "./libs/world";
-import {getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyCar} from "./libs/player";
+import {getPlayer, getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyCar} from "./libs/player";
 import {driveToCoords} from "./libs/vehicle";
 import {getWaypointCoords, isWaypointSet} from "./libs/waypoint";
 
-const debug = false;
+const debug = true;
 
 let teslaModeEnabled = false;
 let currentDestination: Vector3 = null;
 let nextDrivingPointBlip: Blip | null = null;
 
+const maxEtaPatience = 3; // Max ETA patience in minutes before the car starts ignoring traffic laws
 const drivingSpeed = 40; // Speed in miles
-const obeyLaws = true; // Set to false if you want the vehicle to ignore traffic laws
 const disableWhenNotInCar = false; // If true, the mode will disable itself when the player is not in a car
 
 // For calculating ETA
@@ -110,9 +115,13 @@ while (true) {
 
         const currentVehicle = getPlayerChar().getCarIsUsing();
 
-        if (currentVehicle) {
-            currentVehicle.getDriver().clearTasks();
-            Task.StandStill(currentVehicle.getDriver(), 1000);
+        if (currentVehicle && Car.DoesExist(currentVehicle)) {
+            const driver = currentVehicle.getDriver();
+            if (driver && Char.DoesExist(driver) && driver.valueOf() !== getPlayerChar().valueOf()) {
+                log(`distanceToDestination <= 40 - Cleaning tasks for driver ${driver.valueOf()}`);
+                driver.clearTasks();
+                Task.StandStill(driver, 1000);
+            }
         }
 
         wait(1000);
@@ -129,10 +138,15 @@ function sendDriverTo(currentDriver: Char, currentVehicle: Car, destination: Vec
         destination
     );
     const eta = getETA(distanceToDestination, getAverageSpeed());
-    log(`Distance to destination ${distanceToDestination.toFixed(0)} meters. ${eta}`);
+
+    // If the ETA is above threshold or if the player is wanted by the police, then don't obey traffic laws
+    const obeyLaws = (eta.seconds / 60 <= maxEtaPatience) || getPlayer().isWantedLevelGreater(0);
+
+    log(`Distance to destination ${distanceToDestination.toFixed(0)} meters. ${eta.toString()}`);
 
     driveToCoords(currentDriver, currentVehicle, destination, drivingSpeed, obeyLaws);
     debug && updateNextDrivingPointBlip(destination); // Debugging blip
+
     wait(10000); // check again every 10 seconds
 }
 
@@ -171,23 +185,22 @@ function setMode(isEnabled: boolean, displayText: boolean = true) {
 function freeVehicleDrivers() {
     log("Freeing vehicle drivers");
     const playerChar = getPlayerChar();
-    playerChar.clearTasks();
-    playerChar.clearSecondaryTask();
+    // playerChar.clearTasks();
+    // playerChar.clearSecondaryTask();
     playerChar.setKeepTask(false);
-    Task.LeaveCarImmediately(getPlayerChar(), getPlayerCurrentVehicle());
-
     const currentVehicle = getPlayerCurrentVehicle();
+    Task.LeaveCarImmediately(getPlayerChar(), currentVehicle);
 
     if (currentVehicle && Car.DoesExist(currentVehicle)) {
         const driver = currentVehicle.getDriver();
-        if (driver && Char.DoesExist(driver) && driver !== playerChar) {
+        if (driver && Char.DoesExist(driver) && driver.valueOf() !== playerChar.valueOf() && !driver.isDead()) {
+            log(`freeVehicleDrivers - Cleaning tasks for driver ${driver.valueOf()}`);
             driver.clearTasks();
             Task.StandStill(driver, 1000);
             Task.CarDriveWander(driver, currentVehicle, 10000, 1);
         }
     }
 }
-
 
 function recordSpeed(speed: number) {
     recentSpeeds.push(speed);

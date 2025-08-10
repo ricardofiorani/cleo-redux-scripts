@@ -15,6 +15,8 @@ if (!enabled) {
 
 (async () => {
     try {
+        if (!enabled) return;
+
         log("Starting RealWeather script...");
 
         // Step 1: Get player IP-based location and timezone
