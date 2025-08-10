@@ -20,6 +20,7 @@ import {getDriveableCarNodeFromCoords} from "./libs/world";
 import {getPlayer, getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyCar} from "./libs/player";
 import {driveToCoords} from "./libs/vehicle";
 import {getWaypointCoords, isWaypointSet} from "./libs/waypoint";
+import {DrivingStyle} from "./libs/driving";
 
 const debug = true;
 
@@ -74,7 +75,7 @@ while (true) {
         }
 
         sendDriverTo(currentDriver, currentVehicle, currentDestination);
-    } else if(teslaModeEnabled && !getPlayerChar().isInAnyCar() && isTouchingAnyCar(getPlayerChar())) {
+    } else if (teslaModeEnabled && !getPlayerChar().isInAnyCar() && isTouchingAnyCar(getPlayerChar())) {
         const car = getCarThatCharIsTouching(getPlayerChar());
 
         if (!car || !Car.DoesExist(car)) {
@@ -95,7 +96,7 @@ while (true) {
         setMode(false, false);
     }
 
-    if(!currentDestination || !teslaModeEnabled) {
+    if (!currentDestination || !teslaModeEnabled) {
         continue;
     }
 
@@ -127,7 +128,6 @@ while (true) {
         wait(1000);
         Task.LeaveAnyCar(getPlayerChar());
     }
-
 }
 
 function sendDriverTo(currentDriver: Char, currentVehicle: Car, destination: Vector3) {
@@ -138,13 +138,29 @@ function sendDriverTo(currentDriver: Char, currentVehicle: Car, destination: Vec
         destination
     );
     const eta = getETA(distanceToDestination, getAverageSpeed());
+    const etaInMinutes = Math.floor(eta.seconds / 60);
 
     // If the ETA is above threshold or if the player is wanted by the police, then don't obey traffic laws
-    const obeyLaws = (eta.seconds / 60 <= maxEtaPatience) || getPlayer().isWantedLevelGreater(0);
+    let drivingStyle: DrivingStyle = DrivingStyle.IgnoreTrafficDriveAround;
+
+    // switch (true) {
+    //     case (etaInMinutes > maxEtaPatience):
+    //         drivingStyle = DrivingStyle.IgnoreTrafficDriveAround;
+    //         break;
+    //     case (getPlayer().isWantedLevelGreater(0)):
+    //         drivingStyle = DrivingStyle.IgnoreTrafficStayInLane;
+    //         break;
+    //     case (getPlayer().isWantedLevelGreater(1)):
+    //         drivingStyle = DrivingStyle.NormalTrafficIgnoreTrafficLights;
+    //         break;
+    //     default:
+    //         drivingStyle = DrivingStyle.NormalSlightlyRushed;
+    //         break;
+    // }
 
     log(`Distance to destination ${distanceToDestination.toFixed(0)} meters. ${eta.toString()}`);
 
-    driveToCoords(currentDriver, currentVehicle, destination, drivingSpeed, obeyLaws);
+    driveToCoords(currentDriver, currentVehicle, destination, drivingSpeed, drivingStyle);
     debug && updateNextDrivingPointBlip(destination); // Debugging blip
 
     wait(10000); // check again every 10 seconds

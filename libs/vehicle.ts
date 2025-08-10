@@ -1,10 +1,13 @@
-export function driveToCoords(char: Char, vehicle: Car, coords: Vector3, speed: number = 70.0, obeyTraffic: boolean = false): void {
+import {DrivingStyle} from "./driving";
+import {getPedModelName} from "./models";
+
+export function driveToCoords(char: Char, vehicle: Car, coords: Vector3, speed: number = 70.0, drivingStyle: DrivingStyle = DrivingStyle.NormalSlightlyRushed): void {
     if(!Char.DoesExist(char) || !Car.DoesExist(vehicle) || char.isDead()) {
         log(`driveToCoords: Invalid character or vehicle. Char ID: ${char.valueOf()}, Vehicle ID: ${vehicle.valueOf()}`);
         return;
     }
 
-    log(`driveToCoords: Char ID: ${char.valueOf()}, Vehicle ID: ${vehicle.valueOf()}, Coords: ${coords}, Speed: ${speed}, Obey Traffic: ${obeyTraffic}`);
+    log(`driveToCoords: Char ID: ${char.valueOf()} (model: ${getPedModelName(char.getModel())}), Vehicle ID: ${vehicle.valueOf()}, Coords: ${coords.x},${coords.y},${coords.z}, Speed: ${speed}, DrivingStyle: ${drivingStyle}`);
 
     char.clearTasks();
     char.setKeepTask(true);
@@ -19,7 +22,7 @@ export function driveToCoords(char: Char, vehicle: Car, coords: Vector3, speed: 
         coords.z,
         4,
         speed,
-        obeyTraffic ? 1 : 2,
+        drivingStyle,
         5,
         10
     );
