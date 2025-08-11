@@ -140,23 +140,7 @@ function sendDriverTo(currentDriver: Char, currentVehicle: Car, destination: Vec
     const eta = getETA(distanceToDestination, getAverageSpeed());
     const etaInMinutes = Math.floor(eta.seconds / 60);
 
-    // If the ETA is above threshold or if the player is wanted by the police, then don't obey traffic laws
-    let drivingStyle: DrivingStyle = DrivingStyle.IgnoreTrafficDriveAround;
-
-    // switch (true) {
-    //     case (etaInMinutes > maxEtaPatience):
-    //         drivingStyle = DrivingStyle.IgnoreTrafficDriveAround;
-    //         break;
-    //     case (getPlayer().isWantedLevelGreater(0)):
-    //         drivingStyle = DrivingStyle.IgnoreTrafficStayInLane;
-    //         break;
-    //     case (getPlayer().isWantedLevelGreater(1)):
-    //         drivingStyle = DrivingStyle.NormalTrafficIgnoreTrafficLights;
-    //         break;
-    //     default:
-    //         drivingStyle = DrivingStyle.NormalSlightlyRushed;
-    //         break;
-    // }
+    const drivingStyle: DrivingStyle = DrivingStyle.IgnoreTrafficDriveAround;
 
     log(`Distance to destination ${distanceToDestination.toFixed(0)} meters. ${eta.toString()}`);
 

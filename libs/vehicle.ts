@@ -1,5 +1,6 @@
 import {DrivingStyle} from "./driving";
 import {getPedModelName} from "./models";
+import {getVehicleNameFromHash} from "./vehicleList";
 
 export function driveToCoords(char: Char, vehicle: Car, coords: Vector3, speed: number = 70.0, drivingStyle: DrivingStyle = DrivingStyle.NormalSlightlyRushed): void {
     if(!Char.DoesExist(char) || !Car.DoesExist(vehicle) || char.isDead()) {
@@ -7,7 +8,7 @@ export function driveToCoords(char: Char, vehicle: Car, coords: Vector3, speed: 
         return;
     }
 
-    log(`driveToCoords: Char ID: ${char.valueOf()} (model: ${getPedModelName(char.getModel())}), Vehicle ID: ${vehicle.valueOf()}, Coords: ${coords.x},${coords.y},${coords.z}, Speed: ${speed}, DrivingStyle: ${drivingStyle}`);
+    log(`driveToCoords: Char ID: ${char.valueOf()} (model: ${getPedModelName(char.getModel())}), Vehicle ID: ${vehicle.valueOf()} (${getVehicleNameFromHash(vehicle.getModel())}), Coords: ${coords.x},${coords.y},${coords.z}, Speed: ${speed}, DrivingStyle: ${drivingStyle}`);
 
     char.clearTasks();
     char.setKeepTask(true);

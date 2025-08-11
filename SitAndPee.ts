@@ -41,7 +41,7 @@ while (true) {
             const invertedAngle = (heading + 180) % 360;
 
             // How far forward to place the "seat" (in meters)
-            const forwardOffset = 0.2; // adjust this value as needed
+            const forwardOffset = -0.2; // adjust this value as needed
 
             // Convert heading (degrees) to radians
             const rad = heading * Math.PI / 180;
