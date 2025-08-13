@@ -8,19 +8,19 @@
  * If you set disableWhenNotInCar = false , then you can ragdoll in the back of any vehicle that it will take you to the waypoint.
  */
 
-import {Key} from ".config/enums";
-import {BlipColors, cleanupTestBlips, createBlip} from "./libs/blips";
+import {Key} from "../.config/enums";
+import {BlipColors, cleanupTestBlips, createBlip} from "../libs/blips";
 import {
     getCarThatCharIsTouching,
     getDistanceBetweenTwoVectors,
     getETA,
     isTouchingAnyCar,
-} from "./libs/utils";
-import {getDriveableCarNodeFromCoords} from "./libs/world";
-import {getPlayer, getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyCar} from "./libs/player";
-import {driveToCoords} from "./libs/vehicle";
-import {getWaypointCoords, isWaypointSet} from "./libs/waypoint";
-import {DrivingStyle} from "./libs/driving";
+} from "../libs/utils";
+import {getDriveableCarNodeFromCoords} from "../libs/world";
+import {getPlayer, getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyCar} from "../libs/player";
+import {driveToCoords} from "../libs/vehicle";
+import {getWaypointCoords, isWaypointSet} from "../libs/waypoint";
+import {DrivingStyle} from "../libs/driving";
 
 const debug = true;
 

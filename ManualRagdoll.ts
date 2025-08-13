@@ -5,7 +5,7 @@
  * Press Numpad9 to toggle ragdoll state.
  */
 
-import {Key} from "./.config/enums";
+import {Key} from ".config/enums";
 import {getPlayer, getPlayerChar} from "./libs/player";
 
 /**

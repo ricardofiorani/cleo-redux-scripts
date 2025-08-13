@@ -3,7 +3,7 @@
  * This script provides a simple GPS functionality that logs the player's coordinates and street name at regular intervals.
  * Set the constants `interval` and `gpsEnabled` to control the update frequency and whether GPS is active.
  */
-import {getStreetNameFromCoords} from "./libs/utils";
+import {getStreetNameFromCoords} from "../libs/utils";
 
 const interval = 5000; // Interval in milliseconds for GPS updates, 5000 = 5 seconds
 const gpsEnabled = false;

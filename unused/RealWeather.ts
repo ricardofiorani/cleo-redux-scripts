@@ -5,7 +5,7 @@
  * * It uses the Open-Meteo API for weather data and timeapi.io for local time.
  * * Note: This script requires an internet connection to function.
  */
-import {httpGet} from "./libs/HTTP";
+import {httpGet} from "../libs/HTTP";
 
 const enabled = false;
 

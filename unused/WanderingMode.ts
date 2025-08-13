@@ -4,8 +4,8 @@
  * Press Numpad Enter to enable or disable wandering mode.
  */
 
-import {Key} from ".config/enums";
-import {getPlayerChar, getPlayerCurrentVehicle, isPlayerDrivingAnyCar} from "./libs/player";
+import {Key} from "../.config/enums";
+import {getPlayerChar, getPlayerCurrentVehicle, isPlayerDrivingAnyCar} from "../libs/player";
 
 let isWandering = false;
 

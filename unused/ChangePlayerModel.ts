@@ -5,10 +5,10 @@
  * PS: IF ACTIVATED, THIS SCRIPT WILL CRASH THE GAME IF ANY CUTSCENE IS STARTED.
  */
 
-import {Key} from ".config/enums";
-import {getPlayer} from "./libs/player";
-import {getPedModelName, PedModel} from "./libs/models";
-import {loadModel} from "./libs/utils";
+import {Key} from "../.config/enums";
+import {getPlayer} from "../libs/player";
+import {getPedModelName, PedModel} from "../libs/models";
+import {loadModel} from "../libs/utils";
 
 let isActive = false;
 

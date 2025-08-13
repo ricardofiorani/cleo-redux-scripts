@@ -4,8 +4,8 @@
  * Press again to stop/get up
  */
 
-import {Key} from ".config/enums";
-import {getPlayerChar} from "./libs/player";
+import {Key} from "../.config/enums";
+import {getPlayerChar} from "../libs/player";
 
 type PeeingState = {
     ptfxId: number;
