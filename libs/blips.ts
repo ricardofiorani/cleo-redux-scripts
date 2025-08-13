@@ -144,3 +144,9 @@ export function getBlipByType(blipType: number): Blip | null {
 
     return new Blip(blipHandle);
 }
+
+export function safeRemoveBlip(blip: Blip | null): void {
+    if (blip && Blip.DoesExist(blip.valueOf() as number)) {
+        blip.remove();
+    }
+}

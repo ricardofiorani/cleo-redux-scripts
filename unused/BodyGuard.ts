@@ -10,14 +10,14 @@
  *
  */
 
-import {Key} from ".config/enums";
-import {addVec, getDistanceBetweenTwoVectors} from "./libs/utils";
-import {giveCharWeapon, spawnChar, spawnCharInVehicle} from "./libs/char";
-import {RelationshipGroup, RelationshipType} from "./libs/relationship";
-import {getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyVehicle} from "./libs/player";
-import {Weapons} from "./libs/weapons";
-import {addBlipForChar, BlipColors, removeBlipForChar} from "./libs/blips";
-import {getFreePassengerSeat} from "./libs/vehicle";
+import {Key} from "../.config/enums";
+import {addVec, getDistanceBetweenTwoVectors} from "../libs/utils";
+import {giveCharWeapon, spawnChar, spawnCharInVehicle} from "../libs/char";
+import {RelationshipGroup, RelationshipType} from "../libs/relationship";
+import {getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyVehicle} from "../libs/player";
+import {Weapons} from "../libs/weapons";
+import {addBlipForChar, BlipColors, removeBlipForChar} from "../libs/blips";
+import {getFreePassengerSeat} from "../libs/vehicle";
 
 let group: Group;
 let garbageCollection: Char[] = [];

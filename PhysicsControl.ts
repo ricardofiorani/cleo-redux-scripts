@@ -1,4 +1,4 @@
-import {Key} from "./.config/enums";
+import {Key} from ".config/enums";
 import {getPlayer, getPlayerChar} from "./libs/player";
 import {applyForce} from "./libs/physics";
 import {addParticleFXToChar, stopParticleFxOnChar} from "./libs/utils";

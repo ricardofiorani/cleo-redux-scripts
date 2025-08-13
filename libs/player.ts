@@ -20,8 +20,6 @@ export function isPlayerInAnyCar(): boolean {
 }
 
 export function isPlayerDrivingAnyCar(): boolean {
-    log("Checking if player is driving any car");
-
     if (!isPlayerInAnyCar()) {
         return false;
     }

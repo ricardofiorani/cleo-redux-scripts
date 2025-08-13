@@ -1,6 +1,6 @@
-import {Key} from ".config/enums";
-import {addVec} from "./libs/utils";
-import {Bone} from "./libs/bone";
+import {Key} from "../.config/enums";
+import {addVec} from "../libs/utils";
+import {Bone} from "../libs/bone";
 
 let objectId: ScriptObject;
 
