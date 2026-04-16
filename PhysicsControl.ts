@@ -5,6 +5,8 @@ import {addParticleFXToChar, stopParticleFxOnChar} from "./libs/utils";
 import {Bone} from "./libs/bone";
 import {CameraAssistant} from "./libs/camera";
 
+let ENABLED = true
+
 let forceStrength = 60;
 let particlesPointer;
 let isSlowMoEnabled = false;
@@ -50,6 +52,10 @@ const enableSlowMo = (makeInvincible: boolean) => {
 
 while (true) {
     wait(100);
+
+    if (!ENABLED) {
+        continue;
+    }
 
     if (Pad.IsGameKeyboardKeyPressed(Key.NumpadPlus)) {
         forceStrength += 1;

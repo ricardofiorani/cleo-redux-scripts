@@ -1,14 +1,15 @@
-import {getPlayer, getPlayerChar, isPlayerDrivingAnyCar} from "./libs/player";
-import {Key} from ".config/enums";
-import {getDistanceBetweenTwoVectors} from "./libs/utils";
-import {safeRemoveBlip} from "./libs/blips";
-import {getPedModelName} from "./libs/models";
+import { getPlayer, getPlayerChar, isPlayerDrivingAnyCar } from "./libs/player";
+import { Key } from ".config/enums";
+import { getDistanceBetweenTwoVectors } from "./libs/utils";
+import { safeRemoveBlip } from "./libs/blips";
+import { getPedModelName } from "./libs/models";
+import { getVoiceFileByHex } from "./libs/taxiPeds";
 
 /**
- * Debug
+ * Debug System
  */
 const debugEnabled = true;
-// CLEO.debug.trace(debugEnabled)
+// CLEO.debug.trace(debugEnabled) // Uncomment if available in your SDK
 const debug: typeof log = (...values: any[]) => {
     if (debugEnabled) {
         log(...values);
@@ -16,7 +17,7 @@ const debug: typeof log = (...values: any[]) => {
 };
 
 /**
- * Taxi Mission State
+ * Taxi Mission State Enum
  */
 export enum TaxiMissionState {
     Idle,       // Not active
@@ -25,74 +26,77 @@ export enum TaxiMissionState {
     Failed,     // Mission failed (e.g. passenger died, player left taxi)
 }
 
+// Global State Variables
 let missionState: TaxiMissionState = TaxiMissionState.Idle;
+let distanceMultiplier = 1;
+let currentPassenger: Char | null = null;
+let currentPassengerDestination: Vector3 | null = null;
+let currentPassengerBlip: Blip | null = null;
+let currentDestinationBlip: Blip | null = null;
+let lastLocation: Vector3 | null = null; // Stores {x,y,z} of last dropoff or mission start
 
 /**
- * Configuration
+ * Find a random passenger within a specific radius.
  */
-let distanceMultiplier = 1;
-let currentPassenger: Char = null;
-let currentPassengerDestination: Vector3 = null;
-let currentPassengerBlip: Blip = null;
-let currentDestinationBlip: Blip = null;
-let lastLocation: Vector3 = null; // stores {x,y,z} of last dropoff or mission start
-
-
 function findPassengerAround(point: Vector3, searchRange = 10): Char | null {
-    const pedFound = new Char(native<int>("GET_RANDOM_CHAR_IN_AREA_OFFSET_NO_SAVE", point.x, point.y, point.z, searchRange, searchRange, searchRange));
+    const pedId = native<int>("GET_RANDOM_CHAR_IN_AREA_OFFSET_NO_SAVE", point.x, point.y, point.z, searchRange, searchRange, searchRange);
 
-    if (!pedFound || !Char.DoesExist(pedFound)) {
+    if (!pedId || !Char.DoesExist(pedId)) {
         debug(`No ped found at ${point.x.toFixed(2)}, ${point.y.toFixed(2)}, ${point.z.toFixed(2)}`);
         return null;
     }
 
-    Task.StandStill(pedFound, -2);
+    const pedFound = new Char(pedId);
+
+    // Ensure the ped is a mission character to prevent random spawns from interfering
     pedFound.setAsMissionChar();
-    debug(`Passenger found at ${pedFound.getCoordinates().x.toFixed(2)}, ${pedFound.getCoordinates().y.toFixed(2)}, ${pedFound.getCoordinates().z.toFixed(2)}`);
+
+    const model = pedFound.getModel();
+    debug(`Passenger found at ${point.x.toFixed(2)}, ${point.y.toFixed(2)}, ${point.z.toFixed(2)} (Model: ${getPedModelName(model)})`);
 
     return pedFound;
 }
 
-function getRandomPointAtDistance(
-    origin: Vector3,
-    distance: number
-) {
-    // Pick a random angle in radians
+/**
+ * Get a random point at a specific distance from an origin.
+ */
+function getRandomPointAtDistance(origin: Vector3, distance: number): Vector3 {
     const angle = Math.random() * Math.PI * 2;
-
-    // Offset using cosine/sine for a flat 2D circle
     const offsetX = Math.cos(angle) * distance;
     const offsetY = Math.sin(angle) * distance;
 
     return {
         x: origin.x + offsetX,
         y: origin.y + offsetY,
-        z: origin.z // Keep same height
+        z: origin.z // Keep same height (ground level usually works best for spawns)
     };
 }
 
+/**
+ * Start a new Taxi Mission.
+ */
 function startTaxiMission(): boolean {
     debug("Starting taxi mission...");
     const player = getPlayerChar();
 
     if (!lastLocation) {
-        lastLocation = player.getCoordinates()
+        lastLocation = player.getCoordinates();
     }
 
     debug(`Last location: ${lastLocation.x.toFixed(2)}, ${lastLocation.y.toFixed(2)}, ${lastLocation.z.toFixed(2)}`);
 
+    // Calculate next mission distance based on multiplier
     const nextMissionDistance = getNextMissionDistance(distanceMultiplier);
-
     debug(`Taxi mission starting with distance: ${nextMissionDistance}`);
 
-    // Passenger spawn point is between baseDistance*distanceMultiplier and baseDistance*distanceMultiplier*1.5 meters away from lastLocation
-
     let attemptCount = 0;
-    const maxAttempts = 100; // Limit attempts to find a passenger
-    const baseSearchRadius = 50
+    const maxAttempts = 100;
+    const baseSearchRadius = 50;
 
+    // Loop until a valid passenger is found
     while (!currentPassenger || !Char.DoesExist(currentPassenger)) {
         const searchRadius = (attemptCount * baseSearchRadius) + baseSearchRadius;
+
         currentPassenger = findPassengerAround(lastLocation, searchRadius);
 
         debug(`Searching for passenger around in a ${searchRadius} meter radius`);
@@ -107,32 +111,87 @@ function startTaxiMission(): boolean {
         }
     }
 
-    debug(`Passenger found: ${currentPassenger ? currentPassenger.valueOf() : 'none'} (Model: ${getPedModelName(currentPassenger.getModel())})`);
+    debug(`Passenger found: ${currentPassenger ? currentPassenger.valueOf() : 'none'}`);
 
+    // Set destination node (ensure we have a valid point)
     const point = getRandomPointAtDistance(lastLocation, nextMissionDistance);
+
+    if (!point || !Path.GetNextClosestCarNode) {
+        debug("Failed to get destination node.");
+        return false;
+    }
+
     currentPassengerDestination = Path.GetNextClosestCarNode(point.x, point.y, point.z);
 
-    debug(`Found destination ${getDistanceBetweenTwoVectors(currentPassengerDestination, currentPassenger.getCoordinates()).toFixed(2)} meters away from passenger (should be around ${nextMissionDistance} meters)`);
-
+    // Cleanup old blips before creating new ones
     safeRemoveBlip(currentPassengerBlip);
-    safeRemoveBlip(currentDestinationBlip);
+    if (currentDestinationBlip) {
+        safeRemoveBlip(currentDestinationBlip);
+    }
 
     currentPassengerBlip = Blip.AddForChar(currentPassenger);
     currentPassengerBlip.setRoute(true);
 
     showTextBox('Pick up the passenger!');
-    debug("Taxi mission started with increasing distances.");
 
-    return true
+    return true;
 }
 
+/**
+ * Determine which side of the vehicle the passenger is on (Left/Right).
+ */
+function getTaxiHailDirection(passenger: Char, vehicle: Car): "HAIL_LEFT" | "HAIL_RIGHT" {
+    const direction = getTaxiDirectionReference(passenger, vehicle);
+    return direction === 1 ? "HAIL_LEFT" : "HAIL_RIGHT";
+}
+
+/**
+ * Get the side reference (1=Left, 2=Right) and a valid seat index.
+ */
+function getTaxiDirectionReference(passenger: Char, vehicle: Car): number {
+    const passengerPos = passenger.getCoordinates();
+    const vehiclePos = vehicle.getCoordinates();
+
+    // Vector from vehicle to passenger (only in 2D plane)
+    const dx = passengerPos.x - vehiclePos.x;
+    const dy = passengerPos.y - vehiclePos.y;
+
+    // Angle in degrees from vehicle to passenger
+    let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    if (angle < 0) angle += 360;
+
+    // Vehicle's forward heading in degrees
+    let vehicleHeading = vehicle.getHeading();
+    if (vehicleHeading < 0) vehicleHeading += 360;
+
+    // Relative angle between vehicle's heading and passenger position
+    let relativeAngle = angle - vehicleHeading;
+    if (relativeAngle < 0) relativeAngle += 360;
+
+    // Determine side: 1 for Left, 2 for Right
+    const side = (relativeAngle > 0 && relativeAngle < 180) ? 1 : 2;
+
+    return side;
+}
+
+/**
+ * Main Taxi Mission Loop. Handles pickup and dropoff logic.
+ */
 function taxiMissionMainLoop() {
-    // TODO: Throw error here if currentPassenger is null
-    if (!currentPassenger) return;
+    if (!currentPassenger || !Char.DoesExist(currentPassenger)) return;
+
+    // Request Animations for Hail
+    native("REQUEST_ANIMS", "AMB@TAXI_HAIL_M");
+    native("REQUEST_ANIMS", "AMB@TAXI_HAIL_F");
+
+    while (!native("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_M") || !native("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_F")) {
+        wait(100);
+    }
 
     const player = getPlayerChar();
     const playerVehicle = player.getCarIsUsing();
 
+    // Helper to check basic mission validity
     const passBasicChecks = (): boolean => {
         if (!currentPassenger || currentPassenger.isDead()) {
             debug("Passenger is dead, mission failed.");
@@ -153,11 +212,13 @@ function taxiMissionMainLoop() {
         }
 
         return true;
-    }
+    };
+
+    let taxiHailAnimationPlayed = false;
+    const distanceForReaction = 30;
 
     // Step 1: Picking up passenger
-    while (Char.DoesExist(currentPassenger) && player.isInTaxi() && !currentPassenger.isInAnyCar()) {
-        // debug(`Checking passenger pickup...`);
+    while (Char.DoesExist(currentPassenger) && player.isInTaxi() && !currentPassenger.isInAnyCar() && missionState !== TaxiMissionState.Failed) {
         const distanceToPassenger = getDistanceBetweenTwoVectors(player.getCoordinates(), currentPassenger.getCoordinates());
 
         if (!passBasicChecks()) {
@@ -165,46 +226,70 @@ function taxiMissionMainLoop() {
             return;
         }
 
-        if (distanceToPassenger <= 10 && playerVehicle.isStopped()) {
-            // TODO: Check if the seat index is correct for the taxi
-            const taxiPassengerSeatIndex = Math.random() < 0.5 ? 1 : 2; // Randomly choose between the two seats in the back
-            Task.EnterCarAsPassenger(currentPassenger, playerVehicle, -2, taxiPassengerSeatIndex);
+        // Make them look at the taxi and yell something when close enough
+        if (distanceToPassenger <= 10 && !currentPassenger.isInAnyCar() && !taxiHailAnimationPlayed) {
+            const hailDirection = getTaxiHailDirection(currentPassenger, playerVehicle);
+            const animationDictionary = currentPassenger.isMale() ? "AMB@TAXI_HAIL_M" : "AMB@TAXI_HAIL_F";
+
+            Task.TaskLookAtVehicle(currentPassenger, playerVehicle, 2000, 0);
+            currentPassenger.sayAmbientSpeech('TAXI_HAIL', false, false, false);
+
+            // Play Hail Animation
+            Task.PlayAnim(currentPassenger, hailDirection, animationDictionary, 8.00000000, false, true, true, false, -2);
+            taxiHailAnimationPlayed = true;
+        }
+
+        if (distanceToPassenger <= distanceForReaction && playerVehicle.isStopped()) {
+            // Validate passenger seat index before entering car
+            const taxiSide = getTaxiDirectionReference(currentPassenger, playerVehicle);
+
+            // Map side to a valid seat index (-1 for any free seat is safest)
+            // 0=Front Left, 1=Back Left, 2=Front Right, 3=Back Right (approximate GTA IV layout)
+            const taxiSeatIndex = -1;
+
+            Task.EnterCarAsPassenger(currentPassenger, playerVehicle, 5000, taxiSeatIndex);
             showTextBox("Passenger getting in... Drive them to the destination!");
-            wait(4000); // Wait for passenger to get in
+            wait(5000); // Wait for passenger to get in
         }
 
         wait(100);
     }
 
-    // Step 2: Setup to drive to destination
+    // Step 2: Setup to drive to destination (after pickup)
     if (!Char.DoesExist(currentPassenger) || !player.isInTaxi() || !currentPassenger.isInTaxi()) {
         missionState = TaxiMissionState.Failed;
         return;
     }
 
-    if (!passBasicChecks()) {
-        missionState = TaxiMissionState.Failed;
+    safeRemoveBlip(currentPassengerBlip);
+    if (currentDestinationBlip) {
+        safeRemoveBlip(currentDestinationBlip);
+    }
+
+    // Ensure destination is set before creating blip
+    if (!currentPassengerDestination) {
+        debug("No destination found for dropoff.");
         return;
     }
 
-    safeRemoveBlip(currentPassengerBlip);
-    safeRemoveBlip(currentDestinationBlip);
     currentDestinationBlip = Blip.AddForCoord(currentPassengerDestination.x, currentPassengerDestination.y, currentPassengerDestination.z);
     currentDestinationBlip.setRoute(true);
 
+    currentPassenger.sayAmbientSpeech('TAXI_START', true, true, false);
+
     // Step 3: Driving to destination
-    while (Char.DoesExist(currentPassenger) && player.isInTaxi() && currentPassenger.isInTaxi()) {
-        // debug(`Driving to destination...`);
+    while (Char.DoesExist(currentPassenger) && player.isInTaxi() && currentPassenger.isInTaxi() && missionState !== TaxiMissionState.Failed) {
         const distanceToDestination = getDistanceBetweenTwoVectors(player.getCoordinates(), currentPassengerDestination);
 
         if (!passBasicChecks()) {
             return;
         }
 
-        // Check arrival within 10 meters
-        if (distanceToDestination < 10 && playerVehicle.isStopped()) {
+        // Check arrival within distanceForReaction
+        if (distanceToDestination < distanceForReaction && playerVehicle.isStopped()) {
             const distanceTravelled = getDistanceBetweenTwoVectors(lastLocation, player.getCoordinates());
 
+            currentPassenger.sayAmbientSpeech('TAXI_SUCCESS', true, true, false);
             Task.LeaveCarImmediately(currentPassenger, playerVehicle);
             showTextBox("You have arrived at the destination! Let the passenger out.");
             completeTaxiMission(distanceTravelled);
@@ -215,43 +300,57 @@ function taxiMissionMainLoop() {
     }
 }
 
-function computeTaxiFare(distanceMeters: number): number {
-    const BASE_FARE = 15.00; // starting fare in dollars
-    const PER_METER_RATE = 0.30
-    const MAP_MAX_METERS = 6500; // GTA IV inland cap
+/**
+ * Calculate fare based on distance.
+ */
+function calculateFare(distanceMeters: number): number {
+    const BASE_FARE = 2.50; // initial charge
+    const ONE_FIFTH_MILE_METERS = 1609.344 / 5; // ~321.87 meters
+    const PER_SEGMENT_RATE = 0.40;
 
-    // Apply multiplier before capping to max
+    // Cap at GTA IV inland limit (approximate)
+    const MAP_MAX_METERS = 6500;
     const adjustedDistance = Math.min(distanceMeters, MAP_MAX_METERS);
 
-    const distanceCharge = adjustedDistance * PER_METER_RATE;
-    const total = BASE_FARE + distanceCharge;
+    // Calculate distance charge in 1/5 mile increments
+    const segments = adjustedDistance / ONE_FIFTH_MILE_METERS;
+    const distanceCharge = segments * PER_SEGMENT_RATE;
 
-    return Math.round(total);
+    const total = BASE_FARE + distanceCharge;
+    return Math.round(total * 100) / 100; // round to cents
 }
 
-
+/**
+ * Complete the Taxi Mission.
+ */
 function completeTaxiMission(distanceTravelled: number) {
-    const fare = computeTaxiFare(distanceTravelled);
+    if (!currentPassengerDestination || !lastLocation) {
+        debug("Missing location data for fare calculation.");
+        return;
+    }
+
+    const fare = calculateFare(distanceTravelled);
     getPlayer().addScore(fare);
 
-    showTextBox(`Passenger dropped off! You earned $${fare}.`);
+    showTextBox(`Passenger dropped off! You earned $${fare}`);
     debug(`Mission complete. Fare: $${fare}`);
 
     // Update last location to drop-off
-    lastLocation = {...currentPassengerDestination};
+    lastLocation = { ...currentPassengerDestination };
 
-    // Increase distance multiplier for next fare
+    // Increase distance multiplier for next fare (makes missions longer over time)
     distanceMultiplier++;
 
-    // Clean up
+    // Clean up passenger and blips
     if (currentPassenger && Char.DoesExist(currentPassenger)) {
         currentPassenger.markAsNoLongerNeeded();
         if (currentPassenger.isInAnyCar()) {
             Task.LeaveAnyCar(currentPassenger);
             Task.WanderStandard(currentPassenger);
         }
-        currentPassenger = null;
+        currentPassenger = null; // Clear reference
     }
+
     if (currentPassengerBlip) {
         currentPassengerBlip.remove();
         currentPassengerBlip = null;
@@ -264,81 +363,127 @@ function completeTaxiMission(distanceTravelled: number) {
     missionState = TaxiMissionState.Completed;
 }
 
-
-//TODO: Implement max distance due to map size
-function getNextMissionDistance(distanceMultiplier: number) {
+/**
+ * Calculate next mission distance based on multiplier.
+ */
+function getNextMissionDistance(distanceMultiplier: number): number {
     const step = 100; // distance step in meters
     const minDistance = 200; // minimum distance for the first fare
 
     const min = minDistance + (distanceMultiplier - 1) * step;
-    const max = min + step; // small spread so it’s “around” the min
+    const max = min + step; // small spread so it's "around" the min
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 // ===== MAIN LOOP =====
-// try {
-while (true) {
-    wait(100);
+try {
+    while (true) {
+        wait(100);
 
-    const player = getPlayerChar();
+        const player = getPlayerChar();
 
-    if (isPlayerDrivingAnyCar() && player.isInTaxi()) {
-        let promptShown = false;
+        // Only run taxi logic if driving a car and inside the taxi
+        if (isPlayerDrivingAnyCar() && player.isInTaxi()) {
+            let promptShown = false;
 
-        while (player.isInTaxi()) {
-            wait(100);
+            while (player.isInTaxi()) {
+                wait(100);
 
-            if (missionState === TaxiMissionState.Idle && !promptShown) {
-                showTextBox('Press E to work as a taxi driver.');
-                promptShown = true;
-            }
-
-            // Activate a taxi mission
-            // TODO: Use the "action" key instead of E
-            if (Pad.IsGameKeyboardKeyPressed(Key.E) && missionState === TaxiMissionState.Idle) {
-                missionState = TaxiMissionState.TakingFare;
-                showTextBox('Taxi driver mission started! Searching for a passenger...');
-
-                if (startTaxiMission()) {
-                    wait(1000);
+                if (missionState === TaxiMissionState.Idle && !promptShown) {
+                    showTextBox('Press E to work as a taxi driver.');
+                    promptShown = true;
                 }
-            }
 
-            if (missionState === TaxiMissionState.TakingFare) {
-                taxiMissionMainLoop();
+                // Activate a taxi mission
+                if (Pad.IsGameKeyboardKeyPressed(Key.E) && missionState === TaxiMissionState.Idle) {
+                    missionState = TaxiMissionState.TakingFare;
+                    showTextBox('Taxi driver mission started! Searching for a passenger...');
 
-                if (missionState === TaxiMissionState.Completed) {
-                    // Wait 3 seconds before starting next fare
-                    wait(3000);
+                    if (startTaxiMission()) {
+                        wait(1000);
+                    } else {
+                        debug("Failed to start taxi mission after pressing E.");
+                    }
+                }
 
-                    if (player.isInTaxi()) {
-                        missionState = TaxiMissionState.TakingFare;
-                        if (startTaxiMission()) {
-                            showTextBox('Next fare found! Go pick up the passenger!');
-                            wait(1000)
+                // Run the main loop logic for pickup/dropoff
+                if (missionState === TaxiMissionState.TakingFare) {
+                    taxiMissionMainLoop();
+
+                    // @ts-ignore
+                    if (missionState === TaxiMissionState.Completed) {
+                        // Wait 3 seconds before starting next fare
+                        wait(3000);
+
+                        if (player.isInTaxi()) {
+                            missionState = TaxiMissionState.TakingFare;
+                            if (startTaxiMission()) {
+                                showTextBox('Next fare found! Go pick up the passenger!');
+                                wait(1000);
+                            }
+                        } else {
+                            // Player left car after completion, reset state
+                            debug("Player left taxi after completing mission.");
+                            missionState = TaxiMissionState.Idle;
                         }
                     }
                 }
+
+                // @ts-ignore
+                if (missionState === TaxiMissionState.Failed) {
+                    showTextBox('Taxi mission failed. You left the taxi.');
+                    debug("Player left taxi, mission failed.");
+
+                    // Cleanup on failure
+                    if (currentPassenger && Char.DoesExist(currentPassenger)) {
+                        currentPassenger.markAsNoLongerNeeded();
+                        Task.WanderStandard(currentPassenger);
+                        currentPassenger.sayAmbientSpeech('TAXI_BAIL', true, true, false);
+                    }
+
+                    if (currentPassengerBlip) {
+                        currentPassengerBlip.remove();
+                        currentPassengerBlip = null;
+                    }
+                    if (currentDestinationBlip) {
+                        currentDestinationBlip.remove();
+                        currentDestinationBlip = null;
+                    }
+
+                    // Reset multiplier on failure to keep missions manageable
+                    distanceMultiplier = 1;
+                    missionState = TaxiMissionState.Idle;
+                }
             }
-        }
 
-        if (missionState === TaxiMissionState.Failed) {
-            showTextBox('Taxi mission failed. You left the taxi.');
-            debug("Player left taxi, mission failed.");
-            missionState = TaxiMissionState.Idle;
-
-            if (currentPassenger && Char.DoesExist(currentPassenger)) {
-                currentPassenger.markAsNoLongerNeeded();
-                Task.WanderStandard(currentPassenger);
+            if (missionState === TaxiMissionState.Failed) {
+                debug("Outer loop detected failure state.");
             }
+        } else {
+            // If not in taxi, reset state to Idle if currently active
+            if (missionState !== TaxiMissionState.Idle && missionState !== TaxiMissionState.Completed) {
+                debug(`Player exited vehicle. Resetting from ${missionState} to Idle.`);
+                missionState = TaxiMissionState.Idle;
 
-            if (currentPassengerBlip) currentPassengerBlip.remove();
-            if (currentDestinationBlip) currentDestinationBlip.remove();
-            distanceMultiplier = 1;
+                // Cleanup on exit
+                if (currentPassenger && Char.DoesExist(currentPassenger)) {
+                    currentPassenger.markAsNoLongerNeeded();
+                    Task.WanderStandard(currentPassenger);
+                    currentPassenger.sayAmbientSpeech('TAXI_BAIL', true, true, false);
+                }
+
+                if (currentPassengerBlip) {
+                    currentPassengerBlip.remove();
+                    currentPassengerBlip = null;
+                }
+                if (currentDestinationBlip) {
+                    currentDestinationBlip.remove();
+                    currentDestinationBlip = null;
+                }
+            }
         }
     }
+} catch (error) {
+    log("Error in TaxiMission script:", error);
+    showTextBox("An error occurred in the Taxi Mission script. Please check the logs.");
 }
-// } catch (error) {
-//     log("Error in TaxiMission script:", error);
-//     showTextBox("An error occurred in the Taxi Mission script. Please check the logs.");
-// }
