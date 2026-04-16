@@ -1,64 +1,240 @@
 import { getPlayer, getPlayerChar, isPlayerDrivingAnyCar } from "./libs/player";
-import { Key } from ".config/enums";
+import { Key } from "./.config/enums.js";
 import { getDistanceBetweenTwoVectors } from "./libs/utils";
-import { safeRemoveBlip } from "./libs/blips";
+import { safeRemoveBlip, BlipColors } from "./libs/blips";
 import { getPedModelName } from "./libs/models";
 import { getVoiceFileByHex } from "./libs/taxiPeds";
 
-/**
- * Debug System
- */
-const debugEnabled = true;
-// CLEO.debug.trace(debugEnabled) // Uncomment if available in your SDK
-const debug: typeof log = (...values: any[]) => {
-    if (debugEnabled) {
-        log(...values);
-    }
-};
+// ============================================================================
+// CONFIGURATION CONSTANTS
+// ============================================================================
 
-/**
- * Taxi Mission State Enum
- */
+/** Mission configuration constants */
+const MISSION_CONFIG = {
+    // Passenger finding
+    BASE_SEARCH_RADIUS: 50,
+    MAX_FIND_ATTEMPTS: 100,
+    PASSENGER_SPAWN_HEIGHT: 0, // Keep same height as ground level
+
+    // Distance calculation (meters)
+    MIN_DISTANCE: 200,
+    DISTANCE_STEP: 100,
+    MAX_DISTANCE: 6500, // Island limit
+
+    // Fare calculation
+    BASE_FARE: 2.50,
+    PER_SEGMENT_RATE: 0.40,
+    MILE_IN_METERS: 1609.344,
+    FIFTH_MILE_METERS: 1609.344 / 5, // ~321.87 meters
+
+    // Reaction distances
+    HAUL_DISTANCE: 30,
+    PICKUP_DISTANCE: 10,
+    ARRIVAL_DISTANCE: 30,
+
+    // Timing (milliseconds)
+    PICKUP_WAIT_MS: 5000,
+    COMPLETION_DELAY_MS: 4000,
+    NEXT_MISSION_DELAY_MS: 3000,
+    LOOP_INTERVAL_MS: 100,
+    ANIM_LOAD_TIMEOUT: 2000,
+    GRACE_PERIOD_MS: 25000, // 25 seconds to re-enter after exiting taxi
+} as const;
+
+/** Debug categories for structured logging */
+const DebugCategory = {
+    MISSION: "MISSION",
+    PASSENGER: "PASSENGER",
+    MOVEMENT: "MOVEMENT",
+    FARE: "FARE",
+    STATE: "STATE",
+    ERROR: "ERROR",
+} as const;
+
+type DebugCategoryKey = keyof typeof DebugCategory;
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
+/** Taxi Mission State Enum */
 export enum TaxiMissionState {
-    Idle,       // Not active
+    Idle, // Not active
     TakingFare, // Spawning or finding passenger
-    Completed,  // Fare finished successfully
-    Failed,     // Mission failed (e.g. passenger died, player left taxi)
+    Completed, // Fare finished successfully
+    Failed, // Mission failed (e.g. passenger died, player left taxi)
 }
 
-// Global State Variables
-let missionState: TaxiMissionState = TaxiMissionState.Idle;
-let distanceMultiplier = 1;
-let currentPassenger: Char | null = null;
-let currentPassengerDestination: Vector3 | null = null;
-let currentPassengerBlip: Blip | null = null;
-let currentDestinationBlip: Blip | null = null;
-let lastLocation: Vector3 | null = null; // Stores {x,y,z} of last dropoff or mission start
+/** Mission metrics for performance tracking */
+interface MissionMetrics {
+    startTime: number;
+    pickupTime: number;
+    dropoffTime: number;
+    totalDistance: number;
+    attemptCount: number;
+}
+
+/** Passenger mission data */
+interface PassengerMissionData {
+    passenger: Char | null;
+    pickupBlip: Blip | null;
+    destinationBlip: Blip | null;
+    pickupLocation: Vector3 | null;
+    destination: Vector3 | null;
+}
+
+// ============================================================================
+// DEBUG SYSTEM
+// ============================================================================
+
+/** Enable or disable debug output */
+const DEBUG_ENABLED = true;
 
 /**
- * Find a random passenger within a specific radius.
+ * Structured debug output with category support
  */
-function findPassengerAround(point: Vector3, searchRange = 10): Char | null {
-    const pedId = native<int>("GET_RANDOM_CHAR_IN_AREA_OFFSET_NO_SAVE", point.x, point.y, point.z, searchRange, searchRange, searchRange);
+function debugEx(category: DebugCategoryKey, message: string, ...params: any[]): void {
+    if (!DEBUG_ENABLED) return;
+
+    const prefix = `[${DebugCategory[category]}]`;
+    let formatted = message;
+
+    // Format numeric parameters for readability
+    const processedParams = params.map((p) => {
+        if (typeof p === "number") {
+            return Number.isInteger(p) ? p : p.toFixed(2);
+        }
+        if (typeof p === "object" && p !== null) {
+            if ("x" in p && "y" in p && "z" in p) {
+                return `(${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})`;
+            }
+            return JSON.stringify(p);
+        }
+        return p;
+    });
+
+    if (processedParams.length > 0) {
+        formatted += " " + processedParams.join(", ");
+    }
+
+    log(`${prefix} ${formatted}`);
+}
+
+/**
+ * Simple debug alias for backward compatibility
+ */
+const debug = (message: string, ...params: any[]) => {
+    debugEx("MISSION", message, ...params);
+};
+
+// ============================================================================
+// GLOBAL STATE
+// ============================================================================
+
+let missionState: TaxiMissionState = TaxiMissionState.Idle;
+let distanceMultiplier = 1;
+let missionData: PassengerMissionData = {
+    passenger: null,
+    pickupBlip: null,
+    destinationBlip: null,
+    pickupLocation: null,
+    destination: null,
+};
+let lastLocation: Vector3 | null = null; // Stores dropoff or mission start
+let missionMetrics: MissionMetrics = {
+    startTime: 0,
+    pickupTime: 0,
+    dropoffTime: 0,
+    totalDistance: 0,
+    attemptCount: 0,
+};
+
+// Grace period tracking for when player exits taxi
+let gracePeriodStartTime: number = -1;
+let wasInGracePeriod: boolean = false;
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Check if a character is valid for pickup
+ */
+function isValidPassenger(char: Char): boolean {
+    if (!char || !Char.DoesExist(char)) {
+        return false;
+    }
+
+    // Must be on foot (not already in a vehicle)
+    if (!char.isOnFoot()) {
+        debugEx("PASSENGER", "Char not on foot, skipping");
+        return false;
+    }
+
+    // Check if already in any car
+    if (char.isInAnyCar()) {
+        debugEx("PASSENGER", "Char already in car, skipping");
+        return false;
+    }
+
+    // Check if dead or dying
+    if (char.isDead()) {
+        debugEx("PASSENGER", "Char is dead, skipping");
+        return false;
+    }
+
+    // Check health isn't too low
+    if (char.getHealth() < 20) {
+        debugEx("PASSENGER", "Char health too low, skipping");
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Find a random passenger within a specific radius with enhanced validation
+ */
+function findPassengerAround(point: Vector3, searchRange: number): Char | null {
+    debugEx("PASSENGER", `Searching for passenger around`, point, `radius: ${searchRange}m`);
+
+    const pedId = native<int>(
+        "GET_RANDOM_CHAR_IN_AREA_OFFSET_NO_SAVE",
+        point.x,
+        point.y,
+        point.z,
+        searchRange,
+        searchRange,
+        searchRange
+    );
+
 
     if (!pedId || !Char.DoesExist(pedId)) {
-        debug(`No ped found at ${point.x.toFixed(2)}, ${point.y.toFixed(2)}, ${point.z.toFixed(2)}`);
+        debugEx("PASSENGER", "No ped found in area");
         return null;
     }
 
     const pedFound = new Char(pedId);
 
+    // Validate passenger
+    if (!isValidPassenger(pedFound)) {
+        debugEx("PASSENGER", `Ped ${pedId} failed validation`);
+        // Release the invalid ped
+        pedFound.markAsNoLongerNeeded();
+        return null;
+    }
+
     // Ensure the ped is a mission character to prevent random spawns from interfering
     pedFound.setAsMissionChar();
 
     const model = pedFound.getModel();
-    debug(`Passenger found at ${point.x.toFixed(2)}, ${point.y.toFixed(2)}, ${point.z.toFixed(2)} (Model: ${getPedModelName(model)})`);
+    debugEx("PASSENGER", `Passenger found: ${getPedModelName(model)} at`, point);
 
     return pedFound;
 }
 
 /**
- * Get a random point at a specific distance from an origin.
+ * Get a random point at a specific distance from an origin
  */
 function getRandomPointAtDistance(origin: Vector3, distance: number): Vector3 {
     const angle = Math.random() * Math.PI * 2;
@@ -68,77 +244,57 @@ function getRandomPointAtDistance(origin: Vector3, distance: number): Vector3 {
     return {
         x: origin.x + offsetX,
         y: origin.y + offsetY,
-        z: origin.z // Keep same height (ground level usually works best for spawns)
+        z: origin.z + MISSION_CONFIG.PASSENGER_SPAWN_HEIGHT,
     };
 }
 
 /**
- * Start a new Taxi Mission.
+ * Get the next closest car node with fallback handling
  */
-function startTaxiMission(): boolean {
-    debug("Starting taxi mission...");
-    const player = getPlayerChar();
+function getValidCarNode(point: Vector3): Vector3 | null {
+    // Try primary method first
+    const nodeResult = Path.GetNextClosestCarNode(point.x, point.y, point.z);
 
-    if (!lastLocation) {
-        lastLocation = player.getCoordinates();
+    if (nodeResult && (nodeResult.x !== 0 || nodeResult.pResX !== undefined)) {
+        return {
+            x: nodeResult.x || nodeResult.pResX || point.x,
+            y: nodeResult.y || nodeResult.pResY || point.y,
+            z: nodeResult.z || nodeResult.pResZ || point.z,
+        };
     }
 
-    debug(`Last location: ${lastLocation.x.toFixed(2)}, ${lastLocation.y.toFixed(2)}, ${lastLocation.z.toFixed(2)}`);
+    debugEx("MOVEMENT", "GetNextClosestCarNode failed, trying fallback...");
 
-    // Calculate next mission distance based on multiplier
-    const nextMissionDistance = getNextMissionDistance(distanceMultiplier);
-    debug(`Taxi mission starting with distance: ${nextMissionDistance}`);
+    // Fallback to GetClosestCarNode
+    const fallback = Path.GetClosestCarNode(point.x, point.y, point.z);
 
-    let attemptCount = 0;
-    const maxAttempts = 100;
-    const baseSearchRadius = 50;
-
-    // Loop until a valid passenger is found
-    while (!currentPassenger || !Char.DoesExist(currentPassenger)) {
-        const searchRadius = (attemptCount * baseSearchRadius) + baseSearchRadius;
-
-        currentPassenger = findPassengerAround(lastLocation, searchRadius);
-
-        debug(`Searching for passenger around in a ${searchRadius} meter radius`);
-        wait(1000);
-        attemptCount++;
-
-        if (attemptCount >= maxAttempts) {
-            debug("Failed to find a passenger after maximum attempts.");
-            showTextBox("No passengers found nearby. Try again later.");
-            missionState = TaxiMissionState.Failed;
-            return false;
-        }
+    if (fallback && fallback.pResX !== 0) {
+        debugEx("MOVEMENT", "Using GetClosestCarNode fallback");
+        return {
+            x: fallback.pResX,
+            y: fallback.pResY,
+            z: fallback.pResZ,
+        };
     }
 
-    debug(`Passenger found: ${currentPassenger ? currentPassenger.valueOf() : 'none'}`);
+    // Another fallback: GetClosestCarNodeWithHeading
+    const headingFallback = Path.GetClosestCarNodeWithHeading(point.x, point.y, point.z);
 
-    // Set destination node (ensure we have a valid point)
-    const point = getRandomPointAtDistance(lastLocation, nextMissionDistance);
-
-    if (!point || !Path.GetNextClosestCarNode) {
-        debug("Failed to get destination node.");
-        return false;
+    if (headingFallback && headingFallback.pResX !== 0) {
+        debugEx("MOVEMENT", "Using GetClosestCarNodeWithHeading fallback");
+        return {
+            x: headingFallback.pResX,
+            y: headingFallback.pResY,
+            z: headingFallback.pResZ,
+        };
     }
 
-    currentPassengerDestination = Path.GetNextClosestCarNode(point.x, point.y, point.z);
-
-    // Cleanup old blips before creating new ones
-    safeRemoveBlip(currentPassengerBlip);
-    if (currentDestinationBlip) {
-        safeRemoveBlip(currentDestinationBlip);
-    }
-
-    currentPassengerBlip = Blip.AddForChar(currentPassenger);
-    currentPassengerBlip.setRoute(true);
-
-    showTextBox('Pick up the passenger!');
-
-    return true;
+    debugEx("ERROR", "All path node methods failed");
+    return null;
 }
 
 /**
- * Determine which side of the vehicle the passenger is on (Left/Right).
+ * Determine which side of the vehicle the passenger is on
  */
 function getTaxiHailDirection(passenger: Char, vehicle: Car): "HAIL_LEFT" | "HAIL_RIGHT" {
     const direction = getTaxiDirectionReference(passenger, vehicle);
@@ -146,7 +302,7 @@ function getTaxiHailDirection(passenger: Char, vehicle: Car): "HAIL_LEFT" | "HAI
 }
 
 /**
- * Get the side reference (1=Left, 2=Right) and a valid seat index.
+ * Get the side reference (1=Left, 2=Right)
  */
 function getTaxiDirectionReference(passenger: Char, vehicle: Car): number {
     const passengerPos = passenger.getCoordinates();
@@ -169,44 +325,188 @@ function getTaxiDirectionReference(passenger: Char, vehicle: Car): number {
     if (relativeAngle < 0) relativeAngle += 360;
 
     // Determine side: 1 for Left, 2 for Right
-    const side = (relativeAngle > 0 && relativeAngle < 180) ? 1 : 2;
-
-    return side;
+    return relativeAngle > 0 && relativeAngle < 180 ? 1 : 2;
 }
 
 /**
- * Main Taxi Mission Loop. Handles pickup and dropoff logic.
+ * Calculate next mission distance based on multiplier
  */
-function taxiMissionMainLoop() {
-    if (!currentPassenger || !Char.DoesExist(currentPassenger)) return;
+function getNextMissionDistance(multiplier: number): number {
+    const min = MISSION_CONFIG.MIN_DISTANCE + (multiplier - 1) * MISSION_CONFIG.DISTANCE_STEP;
+    const max = min + MISSION_CONFIG.DISTANCE_STEP;
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 
-    // Request Animations for Hail
+/**
+ * Calculate fare based on distance (corrected to use actual travel distance)
+ */
+function calculateFare(distanceMeters: number): number {
+    const adjustedDistance = Math.min(distanceMeters, MISSION_CONFIG.MAX_DISTANCE);
+
+    // Calculate distance charge in 1/5 mile increments
+    const segments = adjustedDistance / MISSION_CONFIG.FIFTH_MILE_METERS;
+    const distanceCharge = segments * MISSION_CONFIG.PER_SEGMENT_RATE;
+
+    const total = MISSION_CONFIG.BASE_FARE + distanceCharge;
+    return Math.round(total * 100) / 100; // Round to cents
+}
+
+// ============================================================================
+// MISSION CONTROL FUNCTIONS
+// ============================================================================
+
+/**
+ * Start a new Taxi Mission
+ */
+function startTaxiMission(): boolean {
+    debugEx("MISSION", "Starting taxi mission...");
+    const player = getPlayerChar();
+
+    // Store initial location for this mission
+    const startLocation = player.getCoordinates();
+    lastLocation = { ...startLocation };
+
+    debugEx("MISSION", "Mission start location:", startLocation);
+
+    // Calculate next mission distance based on multiplier
+    const nextMissionDistance = getNextMissionDistance(distanceMultiplier);
+    debugEx("MISSION", `Target distance: ${nextMissionDistance}m, multiplier: ${distanceMultiplier}`);
+
+    // Initialize metrics
+    missionMetrics.startTime = Date.now();
+    missionMetrics.pickupTime = 0;
+    missionMetrics.dropoffTime = 0;
+    missionMetrics.totalDistance = 0;
+    missionMetrics.attemptCount = 0;
+
+    // Initialize mission data
+    missionData = {
+        passenger: null,
+        pickupBlip: null,
+        destinationBlip: null,
+        pickupLocation: null,
+        destination: null,
+    };
+
+    // Loop until a valid passenger is found
+    while (!missionData.passenger || !Char.DoesExist(missionData.passenger)) {
+        const searchRadius =
+            missionMetrics.attemptCount * MISSION_CONFIG.BASE_SEARCH_RADIUS +
+            MISSION_CONFIG.BASE_SEARCH_RADIUS;
+
+        missionData.passenger = findPassengerAround(startLocation, searchRadius);
+        missionMetrics.attemptCount++;
+
+        debugEx(
+            "PASSENGER",
+            `Search attempt ${missionMetrics.attemptCount}, radius: ${searchRadius}m`
+        );
+
+        if (missionMetrics.attemptCount >= MISSION_CONFIG.MAX_FIND_ATTEMPTS) {
+            debugEx("ERROR", "Failed to find passenger after max attempts");
+            showTextBox("No passengers found nearby. Try again later.");
+            missionState = TaxiMissionState.Failed;
+            return false;
+        }
+
+        // Wait between attempts
+        wait(500);
+    }
+
+    debugEx("PASSENGER", `Passenger found after ${missionMetrics.attemptCount} attempts`);
+
+    // Set destination node
+    const randomPoint = getRandomPointAtDistance(startLocation, nextMissionDistance);
+    const destination = getValidCarNode(randomPoint);
+
+    if (!destination) {
+        debugEx("ERROR", "Failed to get destination node");
+        // Release passenger
+        missionData.passenger.markAsNoLongerNeeded();
+        missionData.passenger = null;
+        return false;
+    }
+
+    missionData.destination = destination;
+    debugEx("MOVEMENT", "Destination set to:", destination);
+
+    // Cleanup old blips
+    safeRemoveBlip(missionData.pickupBlip);
+    safeRemoveBlip(missionData.destinationBlip);
+
+    // Create passenger blip
+    missionData.pickupBlip = Blip.AddForChar(missionData.passenger);
+    missionData.pickupBlip.setRoute(true);
+    missionData.pickupBlip.changeColor(BlipColors.Yellow);
+
+    showTextBox("Pick up the passenger!");
+
+    return true;
+}
+
+/**
+ * Request animation resources with timeout
+ */
+function requestAnimations(): void {
     native("REQUEST_ANIMS", "AMB@TAXI_HAIL_M");
     native("REQUEST_ANIMS", "AMB@TAXI_HAIL_F");
 
-    while (!native("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_M") || !native("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_F")) {
+    const startWait = Date.now();
+    while (
+        !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_M") ||
+        !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_F")
+    ) {
+        if (Date.now() - startWait > MISSION_CONFIG.ANIM_LOAD_TIMEOUT) {
+            debugEx("ERROR", "Animation loading timeout");
+            break;
+        }
         wait(100);
     }
+}
+
+/**
+ * Main Taxi Mission Loop - Handles pickup and dropoff logic
+ */
+function taxiMissionMainLoop(): void {
+    if (!missionData.passenger || !Char.DoesExist(missionData.passenger)) {
+        debugEx("ERROR", "No passenger in main loop");
+        return;
+    }
+
+    // Request animations
+    requestAnimations();
 
     const player = getPlayerChar();
     const playerVehicle = player.getCarIsUsing();
 
-    // Helper to check basic mission validity
+    /**
+     * Basic mission validity checks
+     */
     const passBasicChecks = (): boolean => {
-        if (!currentPassenger || currentPassenger.isDead()) {
-            debug("Passenger is dead, mission failed.");
+        // Check passenger is alive
+        if (!missionData.passenger || missionData.passenger.isDead()) {
+            debugEx("ERROR", "Passenger is dead");
             showTextBox("The passenger is dead. Mission failed.");
             return false;
         }
 
-        if (!currentPassenger.isHealthGreater(40)) {
-            debug(`Passenger health is too low, mission failed. (Health: ${currentPassenger.getHealth()})`);
+        // Check passenger health
+        if (
+            missionData.passenger &&
+            !missionData.passenger.isHealthGreater(40)
+        ) {
+            debugEx("ERROR", `Passenger health too low: ${missionData.passenger.getHealth()}`);
             showTextBox("The passenger is injured. Mission failed.");
             return false;
         }
 
-        if (!Car.DoesExist(playerVehicle) || !playerVehicle.isDriveable() || playerVehicle.isInWater()) {
-            debug("Player vehicle is not driveable, mission failed.");
+        // Check vehicle validity
+        if (
+            !Car.DoesExist(playerVehicle) ||
+            !playerVehicle.isDriveable() ||
+            playerVehicle.isInWater()
+        ) {
+            debugEx("ERROR", "Player vehicle not driveable");
             showTextBox("You wrecked the taxi! Mission failed.");
             return false;
         }
@@ -215,271 +515,461 @@ function taxiMissionMainLoop() {
     };
 
     let taxiHailAnimationPlayed = false;
-    const distanceForReaction = 30;
 
-    // Step 1: Picking up passenger
-    while (Char.DoesExist(currentPassenger) && player.isInTaxi() && !currentPassenger.isInAnyCar() && missionState !== TaxiMissionState.Failed) {
-        const distanceToPassenger = getDistanceBetweenTwoVectors(player.getCoordinates(), currentPassenger.getCoordinates());
+    // ========================================================================
+    // PHASE 1: Picking up passenger
+    // ========================================================================
+    debugEx("MISSION", "Entering pickup phase");
+
+    while (
+        Char.DoesExist(missionData.passenger) &&
+        player.isInTaxi() &&
+        !missionData.passenger.isInAnyCar() &&
+        missionState !== TaxiMissionState.Failed
+    ) {
+        const distanceToPassenger = getDistanceBetweenTwoVectors(
+            player.getCoordinates(),
+            missionData.passenger.getCoordinates()
+        );
 
         if (!passBasicChecks()) {
             missionState = TaxiMissionState.Failed;
             return;
         }
 
-        // Make them look at the taxi and yell something when close enough
-        if (distanceToPassenger <= 10 && !currentPassenger.isInAnyCar() && !taxiHailAnimationPlayed) {
-            const hailDirection = getTaxiHailDirection(currentPassenger, playerVehicle);
-            const animationDictionary = currentPassenger.isMale() ? "AMB@TAXI_HAIL_M" : "AMB@TAXI_HAIL_F";
+        // Make passenger look at taxi and yell when close
+        if (
+            distanceToPassenger <= MISSION_CONFIG.PICKUP_DISTANCE &&
+            !missionData.passenger.isInAnyCar() &&
+            !taxiHailAnimationPlayed
+        ) {
+            const hailDirection = getTaxiHailDirection(
+                missionData.passenger,
+                playerVehicle
+            );
+            const animDict = missionData.passenger.isMale()
+                ? "AMB@TAXI_HAIL_M"
+                : "AMB@TAXI_HAIL_F";
 
-            Task.TaskLookAtVehicle(currentPassenger, playerVehicle, 2000, 0);
-            currentPassenger.sayAmbientSpeech('TAXI_HAIL', false, false, false);
+            // Task to look at vehicle
+            native(
+                "TASK_LOOK_AT_VEHICLE",
+                missionData.passenger,
+                playerVehicle,
+                2000,
+                0
+            );
 
-            // Play Hail Animation
-            Task.PlayAnim(currentPassenger, hailDirection, animationDictionary, 8.00000000, false, true, true, false, -2);
+            // Play hail animation
+            Task.PlayAnim(
+                missionData.passenger,
+                hailDirection,
+                animDict,
+                8.0,
+                false,
+                true,
+                true,
+                false,
+                -2
+            );
+
+            // Taxi honk - commented out as native not available in SDK
+            // Use native("PLAY_CAR_HORN", ...) if your version supports it
+
             taxiHailAnimationPlayed = true;
+            debugEx("PASSENGER", "Hail animation triggered");
         }
 
-        if (distanceToPassenger <= distanceForReaction && playerVehicle.isStopped()) {
-            // Validate passenger seat index before entering car
-            const taxiSide = getTaxiDirectionReference(currentPassenger, playerVehicle);
+        // Attempt to enter vehicle
+        if (
+            distanceToPassenger <= MISSION_CONFIG.HAUL_DISTANCE &&
+            playerVehicle.isStopped()
+        ) {
+            debugEx("PASSENGER", "Requesting passenger entry");
 
-            // Map side to a valid seat index (-1 for any free seat is safest)
-            // 0=Front Left, 1=Back Left, 2=Front Right, 3=Back Right (approximate GTA IV layout)
-            const taxiSeatIndex = -1;
+            // -1 means any free seat
+            Task.EnterCarAsPassenger(
+                missionData.passenger,
+                playerVehicle,
+                5000,
+                -1
+            );
 
-            Task.EnterCarAsPassenger(currentPassenger, playerVehicle, 5000, taxiSeatIndex);
             showTextBox("Passenger getting in... Drive them to the destination!");
-            wait(5000); // Wait for passenger to get in
+            wait(MISSION_CONFIG.PICKUP_WAIT_MS);
         }
 
-        wait(100);
+        wait(MISSION_CONFIG.LOOP_INTERVAL_MS);
     }
 
-    // Step 2: Setup to drive to destination (after pickup)
-    if (!Char.DoesExist(currentPassenger) || !player.isInTaxi() || !currentPassenger.isInTaxi()) {
+    // ========================================================================
+    // PHASE 2: Validate pickup success
+    // ========================================================================
+    if (
+        !Char.DoesExist(missionData.passenger) ||
+        !player.isInTaxi() ||
+        !missionData.passenger.isInTaxi()
+    ) {
+        debugEx("ERROR", "Pickup failed - passenger not in taxi");
         missionState = TaxiMissionState.Failed;
         return;
     }
 
-    safeRemoveBlip(currentPassengerBlip);
-    if (currentDestinationBlip) {
-        safeRemoveBlip(currentDestinationBlip);
+    // Store pickup location for correct fare calculation
+    missionData.pickupLocation = { ...player.getCoordinates() };
+    missionMetrics.pickupTime = Date.now();
+    debugEx("MISSION", "Passenger picked up at", missionData.pickupLocation);
+
+    // Remove pickup blip, create destination blip
+    safeRemoveBlip(missionData.pickupBlip);
+
+    if (missionData.destination) {
+        missionData.destinationBlip = Blip.AddForCoord(
+            missionData.destination.x,
+            missionData.destination.y,
+            missionData.destination.z
+        );
+        missionData.destinationBlip.setRoute(true);
+        missionData.destinationBlip.changeColor(BlipColors.Orange);
     }
 
-    // Ensure destination is set before creating blip
-    if (!currentPassengerDestination) {
-        debug("No destination found for dropoff.");
-        return;
-    }
+    // Passenger dialogue
+    missionData.passenger.sayAmbientSpeech("TAXI_START", true, true, false);
 
-    currentDestinationBlip = Blip.AddForCoord(currentPassengerDestination.x, currentPassengerDestination.y, currentPassengerDestination.z);
-    currentDestinationBlip.setRoute(true);
+    // ========================================================================
+    // PHASE 3: Driving to destination
+    // ========================================================================
+    debugEx("MISSION", "Entering dropoff phase");
 
-    currentPassenger.sayAmbientSpeech('TAXI_START', true, true, false);
-
-    // Step 3: Driving to destination
-    while (Char.DoesExist(currentPassenger) && player.isInTaxi() && currentPassenger.isInTaxi() && missionState !== TaxiMissionState.Failed) {
-        const distanceToDestination = getDistanceBetweenTwoVectors(player.getCoordinates(), currentPassengerDestination);
-
+    while (
+        missionData.passenger &&
+        Char.DoesExist(missionData.passenger) &&
+        player.isInTaxi() &&
+        missionData.passenger.isInTaxi() &&
+        missionState !== TaxiMissionState.Failed
+    ) {
         if (!passBasicChecks()) {
             return;
         }
 
-        // Check arrival within distanceForReaction
-        if (distanceToDestination < distanceForReaction && playerVehicle.isStopped()) {
-            const distanceTravelled = getDistanceBetweenTwoVectors(lastLocation, player.getCoordinates());
+        // Update blip colors based on distance
+        if (missionData.destinationBlip && missionData.destination) {
+            const distanceToDestination = getDistanceBetweenTwoVectors(
+                player.getCoordinates(),
+                missionData.destination
+            );
 
-            currentPassenger.sayAmbientSpeech('TAXI_SUCCESS', true, true, false);
-            Task.LeaveCarImmediately(currentPassenger, playerVehicle);
-            showTextBox("You have arrived at the destination! Let the passenger out.");
-            completeTaxiMission(distanceTravelled);
-            wait(4000);
+            // Color change based on proximity
+            if (distanceToDestination < 20) {
+                missionData.destinationBlip.changeColor(BlipColors.BrightRed);
+            } else if (distanceToDestination < 50) {
+                missionData.destinationBlip.changeColor(BlipColors.Yellow);
+            }
         }
 
-        wait(100);
+        // Check arrival
+        if (
+            missionData.destination &&
+            getDistanceBetweenTwoVectors(player.getCoordinates(), missionData.destination) <
+                MISSION_CONFIG.ARRIVAL_DISTANCE &&
+            playerVehicle.isStopped()
+        ) {
+            // Calculate actual travel distance
+            const distanceTravelled = missionData.pickupLocation
+                ? getDistanceBetweenTwoVectors(
+                      missionData.pickupLocation,
+                      missionData.destination
+                  )
+                : 0;
+
+            missionMetrics.totalDistance = distanceTravelled;
+            missionMetrics.dropoffTime = Date.now();
+
+            // Success!
+            if (missionData.passenger && Char.DoesExist(missionData.passenger)) {
+                missionData.passenger.sayAmbientSpeech("TAXI_SUCCESS", true, true, false);
+                Task.LeaveCarImmediately(missionData.passenger, playerVehicle);
+            }
+
+            showTextBox(
+                "You have arrived at the destination! Let the passenger out."
+            );
+
+            completeTaxiMission(distanceTravelled);
+            wait(MISSION_CONFIG.COMPLETION_DELAY_MS);
+            break;
+        }
+
+        wait(MISSION_CONFIG.LOOP_INTERVAL_MS);
     }
 }
 
 /**
- * Calculate fare based on distance.
+ * Complete the Taxi Mission
  */
-function calculateFare(distanceMeters: number): number {
-    const BASE_FARE = 2.50; // initial charge
-    const ONE_FIFTH_MILE_METERS = 1609.344 / 5; // ~321.87 meters
-    const PER_SEGMENT_RATE = 0.40;
-
-    // Cap at GTA IV inland limit (approximate)
-    const MAP_MAX_METERS = 6500;
-    const adjustedDistance = Math.min(distanceMeters, MAP_MAX_METERS);
-
-    // Calculate distance charge in 1/5 mile increments
-    const segments = adjustedDistance / ONE_FIFTH_MILE_METERS;
-    const distanceCharge = segments * PER_SEGMENT_RATE;
-
-    const total = BASE_FARE + distanceCharge;
-    return Math.round(total * 100) / 100; // round to cents
-}
-
-/**
- * Complete the Taxi Mission.
- */
-function completeTaxiMission(distanceTravelled: number) {
-    if (!currentPassengerDestination || !lastLocation) {
-        debug("Missing location data for fare calculation.");
-        return;
-    }
-
+function completeTaxiMission(distanceTravelled: number): void {
     const fare = calculateFare(distanceTravelled);
     getPlayer().addScore(fare);
 
+    // Calculate mission time
+    const missionTimeMs = missionMetrics.dropoffTime > 0 
+        ? missionMetrics.dropoffTime - missionMetrics.startTime 
+        : 0;
+    const missionTimeSec = missionTimeMs / 1000;
+
     showTextBox(`Passenger dropped off! You earned $${fare}`);
-    debug(`Mission complete. Fare: $${fare}`);
+    debugEx(
+        "FARE",
+        `Mission complete! Fare: $${fare}, Distance: ${distanceTravelled.toFixed(0)}m, Time: ${missionTimeSec.toFixed(1)}s`
+    );
 
     // Update last location to drop-off
-    lastLocation = { ...currentPassengerDestination };
+    if (missionData.destination) {
+        lastLocation = { ...missionData.destination };
+    }
 
-    // Increase distance multiplier for next fare (makes missions longer over time)
-    distanceMultiplier++;
+    // Increase distance multiplier for next fare
+    distanceMultiplier = Math.min(distanceMultiplier + 1, 20);
 
-    // Clean up passenger and blips
-    if (currentPassenger && Char.DoesExist(currentPassenger)) {
-        currentPassenger.markAsNoLongerNeeded();
-        if (currentPassenger.isInAnyCar()) {
-            Task.LeaveAnyCar(currentPassenger);
-            Task.WanderStandard(currentPassenger);
+    // Clean up passenger
+    if (missionData.passenger && Char.DoesExist(missionData.passenger)) {
+        missionData.passenger.markAsNoLongerNeeded();
+
+        if (missionData.passenger.isInAnyCar()) {
+            Task.LeaveAnyCar(missionData.passenger);
+            wait(500);
         }
-        currentPassenger = null; // Clear reference
+
+        Task.WanderStandard(missionData.passenger);
+        missionData.passenger = null;
     }
 
-    if (currentPassengerBlip) {
-        currentPassengerBlip.remove();
-        currentPassengerBlip = null;
-    }
-    if (currentDestinationBlip) {
-        currentDestinationBlip.remove();
-        currentDestinationBlip = null;
-    }
+    // Clean up blips
+    safeRemoveBlip(missionData.pickupBlip);
+    safeRemoveBlip(missionData.destinationBlip);
+
+    missionData.pickupBlip = null;
+    missionData.destinationBlip = null;
 
     missionState = TaxiMissionState.Completed;
 }
 
 /**
- * Calculate next mission distance based on multiplier.
+ * Handle mission failure cleanup
  */
-function getNextMissionDistance(distanceMultiplier: number): number {
-    const step = 100; // distance step in meters
-    const minDistance = 200; // minimum distance for the first fare
+function handleMissionFailure(reason: string): void {
+    debugEx("ERROR", `Mission failed: ${reason}`);
 
-    const min = minDistance + (distanceMultiplier - 1) * step;
-    const max = min + step; // small spread so it's "around" the min
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+    showTextBox(`Taxi mission failed. ${reason}`);
+    missionState = TaxiMissionState.Failed;
+
+    // Cleanup passenger
+    if (missionData.passenger && Char.DoesExist(missionData.passenger)) {
+        missionData.passenger.markAsNoLongerNeeded();
+
+        // Make them leave car if inside
+        if (missionData.passenger.isInAnyCar()) {
+            Task.LeaveAnyCar(missionData.passenger);
+            wait(500);
+        }
+
+        // Wander
+        Task.WanderStandard(missionData.passenger);
+        missionData.passenger.sayAmbientSpeech("TAXI_BAIL", true, true, false);
+        missionData.passenger = null;
+    }
+
+    // Cleanup blips
+    safeRemoveBlip(missionData.pickupBlip);
+    safeRemoveBlip(missionData.destinationBlip);
+    missionData.pickupBlip = null;
+    missionData.destinationBlip = null;
+
+    // Reset multiplier on failure
+    distanceMultiplier = 1;
 }
 
-// ===== MAIN LOOP =====
+/**
+ * Reset mission state completely
+ */
+function resetMissionState(): void {
+    debugEx("STATE", "Resetting mission state");
+
+    missionState = TaxiMissionState.Idle;
+
+    // Reset grace period tracking
+    gracePeriodStartTime = -1;
+    wasInGracePeriod = false;
+
+    // Already cleaned up in handleMissionFailure/completeTaxiMission
+    // Just ensure nulls
+    missionData.passenger = null;
+    missionData.pickupBlip = null;
+    missionData.destinationBlip = null;
+    missionData.pickupLocation = null;
+    missionData.destination = null;
+}
+
+// ============================================================================
+// MAIN LOOP
+// ============================================================================
+
 try {
     while (true) {
-        wait(100);
+        wait(MISSION_CONFIG.LOOP_INTERVAL_MS);
 
         const player = getPlayerChar();
 
-        // Only run taxi logic if driving a car and inside the taxi
+        // Only run taxi logic if driving a car AND inside a taxi
         if (isPlayerDrivingAnyCar() && player.isInTaxi()) {
+            // Check if player returned to taxi during grace period
+            if (wasInGracePeriod && gracePeriodStartTime !== -1) {
+                debugEx("STATE", "Player returned to taxi - resuming mission");
+                // Reset grace period
+                gracePeriodStartTime = -1;
+                wasInGracePeriod = false;
+            }
+
             let promptShown = false;
 
             while (player.isInTaxi()) {
-                wait(100);
+                wait(MISSION_CONFIG.LOOP_INTERVAL_MS);
 
+                // ========================================================================
+                // STATE: Idle - Waiting for player to start
+                // ========================================================================
                 if (missionState === TaxiMissionState.Idle && !promptShown) {
-                    showTextBox('Press E to work as a taxi driver.');
+                    showTextBox("Press E to work as a taxi driver.");
                     promptShown = true;
                 }
 
-                // Activate a taxi mission
-                if (Pad.IsGameKeyboardKeyPressed(Key.E) && missionState === TaxiMissionState.Idle) {
+                // Player presses E to start a mission
+                if (
+                    Pad.IsGameKeyboardKeyPressed(Key.E) &&
+                    missionState === TaxiMissionState.Idle
+                ) {
+                    debugEx("MISSION", "Player activated taxi mission");
                     missionState = TaxiMissionState.TakingFare;
-                    showTextBox('Taxi driver mission started! Searching for a passenger...');
+                    showTextBox(
+                        "Taxi driver mission started! Searching for a passenger..."
+                    );
 
-                    if (startTaxiMission()) {
-                        wait(1000);
+                    if (!startTaxiMission()) {
+                        debugEx("ERROR", "Failed to start taxi mission");
+                        // Reset to idle - startTaxiMission handles failure state
                     } else {
-                        debug("Failed to start taxi mission after pressing E.");
+                        wait(1000);
                     }
                 }
 
-                // Run the main loop logic for pickup/dropoff
+                // ========================================================================
+                // STATE: TakingFare - Active mission
+                // ========================================================================
                 if (missionState === TaxiMissionState.TakingFare) {
                     taxiMissionMainLoop();
+                }
 
-                    // @ts-ignore
-                    if (missionState === TaxiMissionState.Completed) {
-                        // Wait 3 seconds before starting next fare
-                        wait(3000);
+                // ========================================================================
+                // STATE: Completed - Prepare next fare
+                // ========================================================================
+                if (missionState === TaxiMissionState.Completed) {
+                    // Wait before starting next fare
+                    wait(MISSION_CONFIG.NEXT_MISSION_DELAY_MS);
 
-                        if (player.isInTaxi()) {
-                            missionState = TaxiMissionState.TakingFare;
-                            if (startTaxiMission()) {
-                                showTextBox('Next fare found! Go pick up the passenger!');
-                                wait(1000);
-                            }
-                        } else {
-                            // Player left car after completion, reset state
-                            debug("Player left taxi after completing mission.");
-                            missionState = TaxiMissionState.Idle;
+                    if (player.isInTaxi()) {
+                        // Start next fare automatically
+                        missionState = TaxiMissionState.TakingFare;
+
+                        if (startTaxiMission()) {
+                            showTextBox(
+                                "Next fare found! Go pick up the passenger!"
+                            );
+                            wait(1000);
                         }
+                    } else {
+                        // Player left taxi after completion
+                        debugEx("MISSION", "Player left taxi after completion");
+                        resetMissionState();
                     }
                 }
 
-                // @ts-ignore
+                // ========================================================================
+                // STATE: Failed - Handle failure
+                // ========================================================================
                 if (missionState === TaxiMissionState.Failed) {
-                    showTextBox('Taxi mission failed. You left the taxi.');
-                    debug("Player left taxi, mission failed.");
-
-                    // Cleanup on failure
-                    if (currentPassenger && Char.DoesExist(currentPassenger)) {
-                        currentPassenger.markAsNoLongerNeeded();
-                        Task.WanderStandard(currentPassenger);
-                        currentPassenger.sayAmbientSpeech('TAXI_BAIL', true, true, false);
-                    }
-
-                    if (currentPassengerBlip) {
-                        currentPassengerBlip.remove();
-                        currentPassengerBlip = null;
-                    }
-                    if (currentDestinationBlip) {
-                        currentDestinationBlip.remove();
-                        currentDestinationBlip = null;
-                    }
-
-                    // Reset multiplier on failure to keep missions manageable
-                    distanceMultiplier = 1;
-                    missionState = TaxiMissionState.Idle;
+                    // Wait a moment before resetting
+                    wait(1000);
+                    resetMissionState();
                 }
             }
 
-            if (missionState === TaxiMissionState.Failed) {
-                debug("Outer loop detected failure state.");
+            // Player exited the taxi vehicle - check if mission was active
+            if (
+                missionState !== TaxiMissionState.Idle &&
+                missionState !== TaxiMissionState.Completed &&
+                missionState !== TaxiMissionState.Failed
+            ) {
+                // Start grace period if not already in one
+                if (gracePeriodStartTime === -1) {
+                    gracePeriodStartTime = Date.now();
+                    wasInGracePeriod = true;
+                    debugEx("STATE", "Player exited taxi - starting 25s grace period");
+                }
+
+                // Check if grace period has elapsed
+                const timeInGrace = Date.now() - gracePeriodStartTime;
+                if (timeInGrace >= MISSION_CONFIG.GRACE_PERIOD_MS) {
+                    // Grace period expired - fail the mission
+                    debugEx("ERROR", "Grace period expired - player did not return to taxi");
+                    handleMissionFailure("You left the taxi.");
+                    gracePeriodStartTime = -1;
+                    wasInGracePeriod = false;
+                } else {
+                    // Show countdown message
+                    const remainingSec = Math.ceil(
+                        (MISSION_CONFIG.GRACE_PERIOD_MS - timeInGrace) / 1000
+                    );
+                    showTextBox(`Get back in the taxi! ${remainingSec}s remaining`);
+                }
+            } else {
+                // Reset grace period when in valid state
+                gracePeriodStartTime = -1;
+                wasInGracePeriod = false;
             }
         } else {
-            // If not in taxi, reset state to Idle if currently active
-            if (missionState !== TaxiMissionState.Idle && missionState !== TaxiMissionState.Completed) {
-                debug(`Player exited vehicle. Resetting from ${missionState} to Idle.`);
-                missionState = TaxiMissionState.Idle;
-
-                // Cleanup on exit
-                if (currentPassenger && Char.DoesExist(currentPassenger)) {
-                    currentPassenger.markAsNoLongerNeeded();
-                    Task.WanderStandard(currentPassenger);
-                    currentPassenger.sayAmbientSpeech('TAXI_BAIL', true, true, false);
+            // Not in taxi - ensure clean state
+            // Check if we need to handle grace period or fail
+            if (
+                missionState !== TaxiMissionState.Idle &&
+                missionState !== TaxiMissionState.Completed &&
+                missionState !== TaxiMissionState.Failed
+            ) {
+                // Start grace period if not already in one
+                if (gracePeriodStartTime === -1) {
+                    gracePeriodStartTime = Date.now();
+                    wasInGracePeriod = true;
+                    debugEx("STATE", "Player not in taxi - starting 25s grace period");
                 }
 
-                if (currentPassengerBlip) {
-                    currentPassengerBlip.remove();
-                    currentPassengerBlip = null;
+                // Check if grace period has elapsed
+                const timeInGrace = Date.now() - gracePeriodStartTime;
+                if (timeInGrace >= MISSION_CONFIG.GRACE_PERIOD_MS) {
+                    // Grace period expired - fail the mission
+                    debugEx("ERROR", "Grace period expired - mission failed");
+                    handleMissionFailure("You left the taxi.");
+                    gracePeriodStartTime = -1;
+                    wasInGracePeriod = false;
+                } else {
+                    // Show countdown message
+                    const remainingSec = Math.ceil(
+                        (MISSION_CONFIG.GRACE_PERIOD_MS - timeInGrace) / 1000
+                    );
+                    showTextBox(`Get back in the taxi! ${remainingSec}s remaining`);
                 }
-                if (currentDestinationBlip) {
-                    currentDestinationBlip.remove();
-                    currentDestinationBlip = null;
-                }
+            } else {
+                // Reset grace period when in valid state
+                gracePeriodStartTime = -1;
+                wasInGracePeriod = false;
             }
         }
     }
