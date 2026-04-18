@@ -9,7 +9,7 @@
  */
 
 import {Key} from ".config/enums";
-import {BlipColors, cleanupTestBlips, createBlip} from "./libs/blips";
+import {BlipColors, cleanupTestBlips, createBlip, getAutoNavigationCoords, getAnyActiveBlip, getBlipType, getMissionBlip, getWaypointBlip} from "./libs/blips";
 import {
     getCarThatCharIsTouching,
     getDistanceBetweenTwoVectors,
@@ -27,6 +27,7 @@ const debug = true;
 let teslaModeEnabled = false;
 let currentDestination: Vector3 = null;
 let nextDrivingPointBlip: Blip | null = null;
+let followingMissionBlip = false;
 
 const maxEtaPatience = 3; // Max ETA patience in minutes before the car starts ignoring traffic laws
 const drivingSpeed = 40; // Speed in miles
@@ -50,11 +51,37 @@ while (true) {
         wait(1000);
     }
 
-    if (isWaypointSet()) {
-        const waypointCoords = getWaypointCoords();
-        currentDestination = getDriveableCarNodeFromCoords(waypointCoords);
+
+    // Get destination - prioritizes mission blips, falls back to waypoint
+    const navCoords = getAutoNavigationCoords();
+    if (navCoords) {
+        currentDestination = getDriveableCarNodeFromCoords(navCoords);
+        
+        // Determine if we're following a mission blip or waypoint
+        const missionBlip = getMissionBlip();
+        const waypointBlip = getWaypointBlip();
+        
+        // Log for debugging
+        if (missionBlip) {
+            const blipType = getBlipType(missionBlip.valueOf() as number);
+            log(`Found mission blip with type: ${blipType}`);
+        }
+        
+        // Check if mission blip exists and is different from waypoint
+        if (missionBlip && (!waypointBlip || missionBlip.valueOf() !== waypointBlip.valueOf())) {
+            if (!followingMissionBlip) {
+                followingMissionBlip = true;
+                log("Following mission blip");
+            }
+        } else if (waypointBlip) {
+            if (followingMissionBlip) {
+                followingMissionBlip = false;
+                log("Following waypoint");
+            }
+        }
     } else {
         currentDestination = null;
+        followingMissionBlip = false;
         cleanupNextDrivingPointBlip();
         continue;
     }
@@ -171,13 +198,16 @@ function cleanupNextDrivingPointBlip() {
 function setMode(isEnabled: boolean, displayText: boolean = true) {
     if (!isEnabled) {
         currentDestination = null;
+        followingMissionBlip = false;
         cleanupTestBlips();
         cleanupNextDrivingPointBlip();
         nextDrivingPointBlip && nextDrivingPointBlip.remove();
         freeVehicleDrivers();
     }
 
-    displayText && showTextBox(`Tesla Mode : ${isEnabled ? "Enabled" : "Disabled"}`);
+    const destinationType = followingMissionBlip ? "Mission Objective" : (isWaypointSet() ? "Waypoint" : "");
+    const statusText = isEnabled ? `Enabled${destinationType ? " - Following: " + destinationType : ""}` : "Disabled";
+    displayText && showTextBox(`Tesla Mode : ${statusText}`);
 
     teslaModeEnabled = isEnabled;
 }

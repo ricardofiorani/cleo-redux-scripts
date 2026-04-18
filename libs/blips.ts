@@ -135,6 +135,90 @@ export function getWaypointBlip(): Blip | null {
     return getBlipByType(BlipTypes.Waypoint);
 }
 
+// Priority order for mission/storyline blips (higher number = higher priority)
+export const MissionBlipPriority = {
+    [BlipTypes.ScriptedMission]: 5,  // Story mission objectives
+    [BlipTypes.JobObject]: 4,        // Job/objectives
+    [BlipTypes.JobVehicle]: 3,       // Job vehicles
+    [BlipTypes.Radar]: 2,            // Generic radar blips
+    [BlipTypes.Waypoint]: 1,          // Manual waypoint (lowest priority)
+};
+
+/**
+ * Get the blip type using GET_BLIP_INFO_ID_TYPE native
+ */
+export function getBlipType(blipHandle: number): number {
+    return native<number>("GET_BLIP_INFO_ID_TYPE", blipHandle);
+}
+
+/**
+ * Get all active mission blips (excludes waypoint, returns priority mission blips first)
+ * Uses index 0 to get all blips, then filters by type
+ */
+export function getMissionBlip(): Blip | null {
+    let highestPriorityBlip: Blip | null = null;
+    let highestPriority = 0;
+
+    // Iterate through all blips using index 0 (not filtered by type)
+    let blipHandle = native<number>("GET_FIRST_BLIP_INFO_ID", 0);
+    
+    while (blipHandle !== 0) {
+        if (native<boolean>("DOES_BLIP_EXIST", blipHandle)) {
+            const blipType = getBlipType(blipHandle);
+            const priority = MissionBlipPriority[blipType] || 0;
+            
+            if (priority > highestPriority) {
+                highestPriority = priority;
+                highestPriorityBlip = new Blip(blipHandle);
+            }
+        }
+        
+        blipHandle = native<number>("GET_NEXT_BLIP_INFO_ID", 0);
+    }
+
+    return highestPriorityBlip;
+}
+
+/**
+ * Get any active blip on the map (mission or waypoint)
+ * Priority: Mission blips first, then waypoint
+ */
+export function getAnyActiveBlip(): { blip: Blip | null; isWaypoint: boolean } {
+    // First, try to find a mission blip
+    const missionBlip = getMissionBlip();
+    if (missionBlip) {
+        return { blip: missionBlip, isWaypoint: false };
+    }
+
+    // Fall back to waypoint
+    const waypointBlip = getWaypointBlip();
+    if (waypointBlip) {
+        return { blip: waypointBlip, isWaypoint: true };
+    }
+
+    return { blip: null, isWaypoint: false };
+}
+
+/**
+ * Get coordinates from any active blip, with priority for mission blips
+ */
+export function getAutoNavigationCoords(): Vector3 | null {
+    const { blip, isWaypoint } = getAnyActiveBlip();
+    
+    if (!blip) {
+        return null;
+    }
+
+    const coords = blip.getCoordinates();
+    
+    // Check if coords are valid (not at origin)
+    if (coords.x === 0 && coords.y === 0 && coords.z === 0) {
+        return null;
+    }
+
+    return coords;
+}
+
 export function getBlipByType(blipType: number): Blip | null {
     const blipHandle = native<number>("GET_FIRST_BLIP_INFO_ID", blipType);
 

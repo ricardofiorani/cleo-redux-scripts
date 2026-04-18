@@ -1,9 +1,9 @@
-import { getPlayer, getPlayerChar, isPlayerDrivingAnyCar } from "./libs/player";
-import { Key } from "./.config/enums.js";
-import { getDistanceBetweenTwoVectors } from "./libs/utils";
-import { safeRemoveBlip, BlipColors } from "./libs/blips";
-import { getPedModelName } from "./libs/models";
-import { getVoiceFileByHex } from "./libs/taxiPeds";
+import {getPlayer, getPlayerChar, isPlayerDrivingAnyCar} from "./libs/player";
+import {Key} from "./.config/enums.js";
+import {getDistanceBetweenTwoVectors} from "./libs/utils";
+import {safeRemoveBlip, BlipColors} from "./libs/blips";
+import {getPedModelName} from "./libs/models";
+import {getVoiceFileByHex} from "./libs/taxiPeds";
 
 // ============================================================================
 // CONFIGURATION CONSTANTS
@@ -26,6 +26,12 @@ const MISSION_CONFIG = {
     PER_SEGMENT_RATE: 0.40,
     MILE_IN_METERS: 1609.344,
     FIFTH_MILE_METERS: 1609.344 / 5, // ~321.87 meters
+
+    // Tip system
+    TIP_BASE_PERCENTAGE: 0.15, // 15% base tip
+    TIP_TIME_BONUS_PERCENTAGE: 0.10, // Additional 10% for fast delivery
+    TIP_TIME_THRESHOLD_SEC: 120, // Under 2 minutes = time bonus
+    DAMAGE_THRESHOLD: 0.80, // Vehicle health below 80% = no tip
 
     // Reaction distances
     HAUL_DISTANCE: 30,
@@ -152,6 +158,9 @@ let missionMetrics: MissionMetrics = {
 // Grace period tracking for when player exits taxi
 let gracePeriodStartTime: number = -1;
 let wasInGracePeriod: boolean = false;
+
+// Vehicle health tracking for tip calculation
+let vehicleHealthAtPickup: number = 1000;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -303,6 +312,9 @@ function getTaxiHailDirection(passenger: Char, vehicle: Car): "HAIL_LEFT" | "HAI
 
 /**
  * Get the side reference (1=Left, 2=Right)
+ * In GTA IV left-hand drive vehicles:
+ * - relativeAngle < 180 means passenger is on the RIGHT side of the car
+ * - relativeAngle >= 180 means passenger is on the LEFT side of the car
  */
 function getTaxiDirectionReference(passenger: Char, vehicle: Car): number {
     const passengerPos = passenger.getCoordinates();
@@ -324,8 +336,11 @@ function getTaxiDirectionReference(passenger: Char, vehicle: Car): number {
     let relativeAngle = angle - vehicleHeading;
     if (relativeAngle < 0) relativeAngle += 360;
 
-    // Determine side: 1 for Left, 2 for Right
-    return relativeAngle > 0 && relativeAngle < 180 ? 1 : 2;
+    // In GTA IV left-hand drive:
+    // - relativeAngle 0-180 = passenger is on RIGHT side of car
+    // - relativeAngle 180-360 = passenger is on LEFT side of car
+    // So: relativeAngle < 180 returns 2 (Right), else returns 1 (Left)
+    return relativeAngle < 180 ? 2 : 1;
 }
 
 /**
@@ -338,7 +353,8 @@ function getNextMissionDistance(multiplier: number): number {
 }
 
 /**
- * Calculate fare based on distance (corrected to use actual travel distance)
+ * Calculate fare with increasing base for subsequent fares
+ * First fare ~$30, second ~$40, third ~$50, etc.
  */
 function calculateFare(distanceMeters: number): number {
     const adjustedDistance = Math.min(distanceMeters, MISSION_CONFIG.MAX_DISTANCE);
@@ -347,8 +363,86 @@ function calculateFare(distanceMeters: number): number {
     const segments = adjustedDistance / MISSION_CONFIG.FIFTH_MILE_METERS;
     const distanceCharge = segments * MISSION_CONFIG.PER_SEGMENT_RATE;
 
-    const total = MISSION_CONFIG.BASE_FARE + distanceCharge;
+    // Base fare increases with fare number ($30, $40, $50, etc.)
+    // distanceMultiplier starts at 1, so first fare = $20 + 10*1 = $30
+    const baseFareWithMultiplier = 20 + (distanceMultiplier * 10);
+
+    const total = baseFareWithMultiplier + distanceCharge;
     return Math.round(total * 100) / 100; // Round to cents
+}
+
+type Tip = {
+    amount: number;
+    reason: string | null
+}
+
+/**
+ * Calculate tip based on driving performance (vehicle damage and time)
+ * Returns tip amount and reason for no tip if applicable
+ */
+function calculateTip(fare: number, currentVehicleHealth: number): Tip {
+    const maxHealth = 1000;
+    const healthPercent = currentVehicleHealth / maxHealth;
+    const healthPercentInt = Math.round(healthPercent * 100);
+
+    debugEx("FARE", `Vehicle health: ${currentVehicleHealth}/${maxHealth} = ${healthPercentInt}%`);
+
+    // No tip if vehicle is too damaged
+    if (healthPercent < MISSION_CONFIG.DAMAGE_THRESHOLD) {
+        const reason = `Vehicle too damaged (${healthPercentInt}% < 80%)`;
+        debugEx("FARE", `No tip - ${reason}`);
+        showTextBox("No tip: Vehicle was too damaged!");
+        return {amount: 0, reason};
+    }
+
+    // Calculate time-based bonus
+    const tripTimeMs = missionMetrics.dropoffTime > 0
+        ? missionMetrics.dropoffTime - missionMetrics.pickupTime
+        : 0;
+    const tripTimeSec = tripTimeMs / 1000;
+
+    // Base tip (15%)
+    let tip = fare * MISSION_CONFIG.TIP_BASE_PERCENTAGE;
+
+    // Time bonus if delivered fast (under 2 minutes)
+    if (tripTimeSec < MISSION_CONFIG.TIP_TIME_THRESHOLD_SEC) {
+        const timeBonus = fare * MISSION_CONFIG.TIP_TIME_BONUS_PERCENTAGE;
+        tip += timeBonus;
+        debugEx("FARE", `Fast delivery bonus: +${timeBonus.toFixed(2)} (${tripTimeSec.toFixed(1)}s)`);
+        showTextBox(`Fast trip! You earned a ${timeBonus.toFixed(2)} tip bonus!`);
+    }
+
+    return {amount: Math.round(tip * 100) / 100, reason: null};
+}
+
+/**
+ * Determine the best seat for passenger entry
+ * Priority: rear seats (seat 1, then 2), front passenger (seat 0) only if back full
+ */
+function getBestPassengerSeat(vehicle: Car): number {
+    const maxPassengers = vehicle.getMaximumNumberOfPassengers();
+
+    // Check rear seats first (seat 1 = rear left, seat 2 = rear right in GTA IV)
+    if (maxPassengers >= 2) {
+        if (vehicle.isPassengerSeatFree(1)) {
+            debugEx("PASSENGER", "Using rear left seat (1)");
+            return 1;
+        }
+        if (maxPassengers >= 3 && vehicle.isPassengerSeatFree(2)) {
+            debugEx("PASSENGER", "Using rear right seat (2)");
+            return 2;
+        }
+    }
+
+    // If back seats are full, use front passenger seat (0)
+    if (vehicle.isPassengerSeatFree(0)) {
+        debugEx("PASSENGER", "Back seats full, using front passenger seat (0)");
+        return 0;
+    }
+
+    // No seats available
+    debugEx("ERROR", "No passenger seats available!");
+    return -2;
 }
 
 // ============================================================================
@@ -360,11 +454,26 @@ function calculateFare(distanceMeters: number): number {
  */
 function startTaxiMission(): boolean {
     debugEx("MISSION", "Starting taxi mission...");
+
+    // Check for conflicting GTA taxi missions to prevent interference
+    const taxiScriptCount = native<int>("GET_NUMBER_OF_INSTANCES_OF_STREAMED_SCRIPT", "taxi");
+    const romanTaxiCount = native<int>("GET_NUMBER_OF_INSTANCES_OF_STREAMED_SCRIPT", "roman_taxi");
+
+    if (taxiScriptCount > 0 || romanTaxiCount > 0) {
+        debugEx("ERROR", "Another taxi mission is already active");
+        showTextBox("Another taxi mission is active. Please wait.");
+        return false;
+    }
+
+    // Set mission flag to prevent other missions from interfering
+    native("SET_MISSION_FLAG", true);
+
+    // Prevent wanted level changes during taxi mission
     const player = getPlayerChar();
 
     // Store initial location for this mission
     const startLocation = player.getCoordinates();
-    lastLocation = { ...startLocation };
+    lastLocation = {...startLocation};
 
     debugEx("MISSION", "Mission start location:", startLocation);
 
@@ -378,6 +487,7 @@ function startTaxiMission(): boolean {
     missionMetrics.dropoffTime = 0;
     missionMetrics.totalDistance = 0;
     missionMetrics.attemptCount = 0;
+
 
     // Initialize mission data
     missionData = {
@@ -455,7 +565,7 @@ function requestAnimations(): void {
     while (
         !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_M") ||
         !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_F")
-    ) {
+        ) {
         if (Date.now() - startWait > MISSION_CONFIG.ANIM_LOAD_TIMEOUT) {
             debugEx("ERROR", "Animation loading timeout");
             break;
@@ -526,7 +636,7 @@ function taxiMissionMainLoop(): void {
         player.isInTaxi() &&
         !missionData.passenger.isInAnyCar() &&
         missionState !== TaxiMissionState.Failed
-    ) {
+        ) {
         const distanceToPassenger = getDistanceBetweenTwoVectors(
             player.getCoordinates(),
             missionData.passenger.getCoordinates()
@@ -587,12 +697,30 @@ function taxiMissionMainLoop(): void {
         ) {
             debugEx("PASSENGER", "Requesting passenger entry");
 
-            // -1 means any free seat
+            // Get the side the passenger is on and use the corresponding rear seat
+            const hailDirection = getTaxiHailDirection(missionData.passenger, playerVehicle);
+
+            // In GTA IV left-hand drive:
+            // - HAIL_RIGHT (passenger on right) -> seat 3 (rear right)
+            // - HAIL_LEFT (passenger on left) -> seat 2 (rear left)
+            // Fall back to seat 1 (front passenger) if rear is occupied
+            let seatIndex: number;
+
+            if (hailDirection === "HAIL_RIGHT") {
+                // Passenger on right side - use rear right seat (3)
+                seatIndex = playerVehicle.isPassengerSeatFree(3) ? 3 : 1;
+            } else {
+                // Passenger on left side - use rear left seat (2)
+                seatIndex = playerVehicle.isPassengerSeatFree(2) ? 2 : 1;
+            }
+
+            debugEx("PASSENGER", `Passenger entering seat: ${seatIndex} (direction: ${hailDirection})`);
+
             Task.EnterCarAsPassenger(
                 missionData.passenger,
                 playerVehicle,
                 5000,
-                -1
+                seatIndex
             );
 
             showTextBox("Passenger getting in... Drive them to the destination!");
@@ -616,9 +744,12 @@ function taxiMissionMainLoop(): void {
     }
 
     // Store pickup location for correct fare calculation
-    missionData.pickupLocation = { ...player.getCoordinates() };
+    missionData.pickupLocation = {...player.getCoordinates()};
     missionMetrics.pickupTime = Date.now();
-    debugEx("MISSION", "Passenger picked up at", missionData.pickupLocation);
+
+    // Store vehicle health at pickup for tip calculation
+    vehicleHealthAtPickup = playerVehicle.getHealth();
+    debugEx("MISSION", "Passenger picked up at", missionData.pickupLocation, `| Vehicle health: ${vehicleHealthAtPickup}`);
 
     // Remove pickup blip, create destination blip
     safeRemoveBlip(missionData.pickupBlip);
@@ -647,7 +778,7 @@ function taxiMissionMainLoop(): void {
         player.isInTaxi() &&
         missionData.passenger.isInTaxi() &&
         missionState !== TaxiMissionState.Failed
-    ) {
+        ) {
         if (!passBasicChecks()) {
             return;
         }
@@ -671,15 +802,15 @@ function taxiMissionMainLoop(): void {
         if (
             missionData.destination &&
             getDistanceBetweenTwoVectors(player.getCoordinates(), missionData.destination) <
-                MISSION_CONFIG.ARRIVAL_DISTANCE &&
+            MISSION_CONFIG.ARRIVAL_DISTANCE &&
             playerVehicle.isStopped()
         ) {
             // Calculate actual travel distance
             const distanceTravelled = missionData.pickupLocation
                 ? getDistanceBetweenTwoVectors(
-                      missionData.pickupLocation,
-                      missionData.destination
-                  )
+                    missionData.pickupLocation,
+                    missionData.destination
+                )
                 : 0;
 
             missionMetrics.totalDistance = distanceTravelled;
@@ -708,24 +839,43 @@ function taxiMissionMainLoop(): void {
  * Complete the Taxi Mission
  */
 function completeTaxiMission(distanceTravelled: number): void {
+    const playerVehicle = getPlayerChar().getCarIsUsing();
+
+    // Calculate fare with increasing base
     const fare = calculateFare(distanceTravelled);
-    getPlayer().addScore(fare);
 
-    // Calculate mission time
-    const missionTimeMs = missionMetrics.dropoffTime > 0 
-        ? missionMetrics.dropoffTime - missionMetrics.startTime 
+    // Calculate tip based on driving performance (damage + time)
+    let tip: Tip;
+    let currentVehicleHealth = 1000;
+    if (playerVehicle && Car.DoesExist(playerVehicle)) {
+        currentVehicleHealth = playerVehicle.getHealth();
+        tip = calculateTip(fare, currentVehicleHealth);
+    }
+
+    const totalEarnings = fare + tip.amount;
+    getPlayer().addScore(totalEarnings);
+
+    // Calculate trip time (pickup to dropoff)
+    const tripTimeMs = missionMetrics.dropoffTime > 0
+        ? missionMetrics.dropoffTime - missionMetrics.pickupTime
         : 0;
-    const missionTimeSec = missionTimeMs / 1000;
+    const tripTimeSec = tripTimeMs / 1000;
 
-    showTextBox(`Passenger dropped off! You earned $${fare}`);
+    // Display results with time and tip info
+    if (tip.amount > 0) {
+        showTextBox(`Trip complete! Fare: ${fare.toFixed(2)} | Time: ${tripTimeSec.toFixed(0)}s | Tip: ${tip.toFixed(2)} | Total: ${totalEarnings.toFixed(2)}`);
+    } else {
+        showTextBox(`Trip complete! Fare: ${fare.toFixed(2)} | Time: ${tripTimeSec.toFixed(0)}s | No tip (vehicle damaged or slow)`);
+    }
+
     debugEx(
         "FARE",
-        `Mission complete! Fare: $${fare}, Distance: ${distanceTravelled.toFixed(0)}m, Time: ${missionTimeSec.toFixed(1)}s`
+        `Mission complete! Fare: ${fare.toFixed(2)}, Tip: ${tip.amount.toFixed(2)}, Total: ${totalEarnings.toFixed(2)}, Distance: ${distanceTravelled.toFixed(0)}m, Trip Time: ${tripTimeSec.toFixed(1)}s`
     );
 
     // Update last location to drop-off
     if (missionData.destination) {
-        lastLocation = { ...missionData.destination };
+        lastLocation = {...missionData.destination};
     }
 
     // Increase distance multiplier for next fare

@@ -52,3 +52,46 @@ export function isPlayerInAnyVehicle(): boolean {
     const playerChar = getPlayerChar();
     return playerChar.isInAnyCar() || playerChar.isInAnyHeli() || playerChar.isInAnyPlane() || playerChar.isInAnyBoat();
 }
+
+/**
+ * Check if the player is driving/riding in a taxi vehicle
+ */
+export function isPlayerInTaxi(): boolean {
+    const playerChar = getPlayerChar();
+    
+    if (!playerChar.isInAnyCar()) {
+        return false;
+    }
+    
+    const car = playerChar.getCarIsUsing();
+    if (!car || !Car.DoesExist(car)) {
+        return false;
+    }
+    
+    // Check if the vehicle model is a taxi (either TAXI or TAXI2)
+    const model = car.getModel();
+    const TAXI_HASH = 3338918751; // taxi
+    const TAXI2_HASH = 1208856469; // taxi2
+    
+    return model === TAXI_HASH || model === TAXI2_HASH;
+}
+
+/**
+ * Check if a char is inside a taxi
+ */
+export function isCharInTaxi(char: Char): boolean {
+    if (!char.isInAnyCar()) {
+        return false;
+    }
+    
+    const car = char.getCarIsUsing();
+    if (!car || !Car.DoesExist(car)) {
+        return false;
+    }
+    
+    const model = car.getModel();
+    const TAXI_HASH = 3338918751; // taxi
+    const TAXI2_HASH = 1208856469; // taxi2
+    
+    return model === TAXI_HASH || model === TAXI2_HASH;
+}
