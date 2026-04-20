@@ -240,6 +240,7 @@ let missionData: PassengerMissionData = {
     destination: null,
 };
 let lastLocation: Vector3 | null = null;
+let currentDestinationName: string = "";
 let missionMetrics: MissionMetrics = {
     startTime: 0,
     pickupTime: 0,
@@ -538,8 +539,9 @@ function startTaxiMission(): boolean {
 
     debugEx("PASSENGER", `Passenger found after ${missionMetrics.attemptCount} attempts`);
 
-    const randomPoint = getRandomPointAtDistance(startLocation, nextMissionDistance);
-    const destination = getValidCarNode(randomPoint);
+    const randomLoc = ImportantLocations[Math.floor(Math.random() * ImportantLocations.length)];
+    currentDestinationName = randomLoc.name;
+    const destination = randomLoc.coords;
 
     if (!destination) {
         debugEx("ERROR", "Failed to get destination node");
@@ -558,7 +560,7 @@ function startTaxiMission(): boolean {
     missionData.pickupBlip.setRoute(true);
     missionData.pickupBlip.changeColor(BlipColors.Yellow);
 
-    showTextBox("Pick up the passenger!");
+    showTextBox(`Go to ${currentDestinationName}!`);
 
     return true;
 }
@@ -712,7 +714,7 @@ function taxiMissionMainLoop(): void {
                 seatIndex
             );
 
-            showTextBox("Passenger getting in... Drive them to the destination!");
+            showTextBox(`Passenger getting in... Drive to ${currentDestinationName}!`);
             wait(MISSION_CONFIG.PICKUP_WAIT_MS);
         }
 
