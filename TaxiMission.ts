@@ -585,12 +585,18 @@ function taxiMissionMainLoop(): void {
 
             const hailDirection = getTaxiHailDirection(missionData.passenger, playerVehicle);
 
+            // FIXED: Use correct side seats - passenger enters from side they're standing on
+            // GTA IV seat indices: 0 = front passenger (right), 1 = rear left (left), 2 = rear right (right), 3 = far right
+            // When passenger hails from RIGHT side (HAIL_RIGHT) → use right side seats (0 or 2)
+            // When passenger hails from LEFT side (HAIL_LEFT) → use left side seats (1 or 3)
             let seatIndex: number;
 
             if (hailDirection === "HAIL_RIGHT") {
-                seatIndex = playerVehicle.isPassengerSeatFree(3) ? 3 : 1;
+                // Passenger on right side - use right side seats (0 front-passenger, 2 rear-right)
+                seatIndex = playerVehicle.isPassengerSeatFree(0) ? 0 : (playerVehicle.isPassengerSeatFree(2) ? 2 : -1);
             } else {
-                seatIndex = playerVehicle.isPassengerSeatFree(2) ? 2 : 1;
+                // Passenger on left side - use left side seats (1 rear-left, 3 far-right)
+                seatIndex = playerVehicle.isPassengerSeatFree(1) ? 1 : (playerVehicle.isPassengerSeatFree(3) ? 3 : -1);
             }
 
             debugEx("PASSENGER", `Passenger entering seat: ${seatIndex} (direction: ${hailDirection})`);
