@@ -1,5 +1,5 @@
 import {getPlayer, getPlayerChar, isPlayerDrivingAnyCar} from "./libs/player";
-import {Key} from "./.config/enums.js";
+import {Key} from ".config/enums.js";
 import {getDistanceBetweenTwoVectors} from "./libs/utils";
 import {safeRemoveBlip, BlipColors} from "./libs/blips";
 import {getPedModelName} from "./libs/models";
@@ -58,6 +58,110 @@ const DebugCategory = {
 } as const;
 
 type DebugCategoryKey = keyof typeof DebugCategory;
+
+type Location = {
+    name: string;
+    coords: { x: number, y: number, z?: number };
+    probability: number; // from 0 to 100%
+}
+
+const ImportantLocations: Location[] = [
+    {
+        name: "Airport",
+        coords: {"x": 2357.66748046875, "y": 371.1781921386719, "z": 6.085225582122803},
+        probability: 15
+    },
+    {
+        name: "Park 1",
+        coords: {"x": 1562.795166015625, "y": 547.4894409179688, "z": 28.536052703857422},
+        probability: 15
+    },
+    {
+        name: "Park 2",
+        coords: {"x": 1107.8795166015625, "y": -141.51939392089844, "z": 32.64236831665039},
+        probability: 15
+    },
+    {
+        name: "Fair",
+        coords: {"x": 950.1388549804688, "y": -660.3601684570312, "z": 13.655376434326172},
+        probability: 15
+    },
+    {
+        name: "Hove Beach Station",
+        coords: {"x": 997.7302856445312, "y": -544.7447509765625, "z": 14.33981704711914},
+        probability: 15
+    },
+    {
+        name: "Schotler Medical Center",
+        coords: {"x": 1190.4693603515625, "y": 195.2804718017578, "z": 31.89065933227539},
+        probability: 15
+    },
+    {
+        name: "Steinway Park",
+        coords: {"x": 847.2088623046875, "y": 733.6497802734375, "z": 7.21943473815918},
+        probability: 15
+    },
+    {
+        name: "Store De Koch",
+        coords: {"x": 118.59583282470703, "y": 969.6500244140625, "z": 14.033636093139648},
+        probability: 15
+    },
+    {
+        name: "Libertonian Museum",
+        coords: {"x": -61.060279846191406, "y": 809.8582153320312, "z": 14.057557106018066},
+        probability: 15
+    },
+    {
+        name: "Star Junction",
+        coords: {"x": -190.83172607421875, "y": 361.3773193359375, "z": 14.804203033447266},
+        probability: 15
+    },
+    {
+        name: "Heli-Tour",
+        coords: { "x": 296.9700927734375, "y": -679.6715087890625, "z": 4.204738616943359 },
+        probability: 15
+    },
+    {
+        name: "Castle Gardens",
+        coords: { "x": -155.99966430664062, "y": -801.5526123046875, "z": 4.910671234130859 },
+        probability: 15
+    },
+    {
+        name: "Castle Gardens City",
+        coords: { "x": -511.0885314941406, "y": -270.78411865234375, "z": 7.473130702972412 },
+        probability: 15
+    },
+    {
+        name: "Train Hard Store",
+        coords: { "x": -124.25224304199219, "y": -12.812334060668945, "z": 14.23044204711914 },
+        probability: 15
+    },
+    {
+        name: "Burger Shot",
+        coords: { "x": -175.88717651367188, "y": 272.3224792480469, "z": 14.198423385620117 },
+        probability: 15
+    },
+    {
+        name: "Holland Hospital Center",
+        coords: { "x": -391.6754455566406, "y": 1268.3983154296875, "z": 22.489723205566406 },
+        probability: 15
+    },
+    {
+        name: "Vespuci Circus",
+        coords: { "x": -208.48712158203125, "y": 1492.4622802734375, "z": 17.86697006225586 },
+        probability: 15
+    },
+    {
+        name: "Middle Park",
+        coords: { "x": -170.12892150878906, "y": 1178.3424072265625, "z": 14.226988792419434 },
+        probability: 15
+    },
+    {
+        name: "International Online",
+        coords: { "x": -891.8658447265625, "y": 1039.62744140625, "z": 20.11684226989746 },
+        probability: 15
+    }
+]
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -722,7 +826,7 @@ function completeTaxiMission(distanceTravelled: number): void {
     const fare = calculateFare(distanceTravelled);
 
     // FIXED: Initialize tip with default value to prevent undefined access
-    let tip: Tip = { amount: 0, reason: null };
+    let tip: Tip = {amount: 0, reason: null};
     let currentVehicleHealth = 1000;
 
     if (playerVehicle && Car.DoesExist(playerVehicle)) {
