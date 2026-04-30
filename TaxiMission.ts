@@ -35,7 +35,7 @@ const MISSION_CONFIG = {
 
     // Reaction distances
     HAUL_DISTANCE: 30,
-    PICKUP_DISTANCE: 10,
+    PICKUP_DISTANCE: 15,
     ARRIVAL_DISTANCE: 30,
 
     // Timing (milliseconds)
@@ -489,7 +489,7 @@ function startTaxiMission(): boolean {
         return false;
     }
 
-    native("SET_MISSION_FLAG", true);
+    Mission.SetFlag(true)
 
     const player = getPlayerChar();
 
@@ -934,7 +934,8 @@ function resetMissionState(): void {
     missionData.pickupLocation = null;
     missionData.destination = null;
 
-    native("SET_MISSION_FLAG", false);
+    Mission.SetFlag(false);
+    Mission.TerminateThisScript()
 }
 
 // ============================================================================
