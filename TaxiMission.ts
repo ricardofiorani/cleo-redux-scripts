@@ -1,9 +1,9 @@
 import {getPlayer, getPlayerChar, isPlayerDrivingAnyCar} from "./libs/player";
+// @ts-ignore
 import {Key} from ".config/enums.js";
 import {getDistanceBetweenTwoVectors} from "./libs/utils";
 import {safeRemoveBlip, BlipColors} from "./libs/blips";
 import {getPedModelName} from "./libs/models";
-import {getVoiceFileByHex} from "./libs/taxiPeds";
 
 // ============================================================================
 // CONFIGURATION CONSTANTS
@@ -698,10 +698,10 @@ function taxiMissionMainLoop(): void {
             let seatIndex: number;
 
             if (hailDirection === "HAIL_RIGHT") {
-                // Passenger on right side - use right side seats (0 front-passenger, 2 rear-right)
-                seatIndex = playerVehicle.isPassengerSeatFree(0) ? 0 : (playerVehicle.isPassengerSeatFree(2) ? 2 : -1);
+                // Passenger on right side - use right side rear seats (2 rear-right, 0 front-passenger fallback)
+                seatIndex = playerVehicle.isPassengerSeatFree(2) ? 2 : (playerVehicle.isPassengerSeatFree(0) ? 0 : -1);
             } else {
-                // Passenger on left side - use left side seats (1 rear-left, 3 far-right)
+                // Passenger on left side - use left side rear seats (1 rear-left, 3 far-right)
                 seatIndex = playerVehicle.isPassengerSeatFree(1) ? 1 : (playerVehicle.isPassengerSeatFree(3) ? 3 : -1);
             }
 
@@ -714,7 +714,7 @@ function taxiMissionMainLoop(): void {
                 seatIndex
             );
 
-            showTextBox(`Passenger getting in... Drive to ${currentDestinationName}!`);
+            showTextBox("Passenger getting in...");
             wait(MISSION_CONFIG.PICKUP_WAIT_MS);
         }
 
@@ -919,6 +919,7 @@ function handleMissionFailure(reason: string): void {
     missionData.destinationBlip = null;
 
     distanceMultiplier = 1;
+    resetMissionState();
 }
 
 function resetMissionState(): void {
