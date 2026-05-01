@@ -22,9 +22,7 @@ const MISSION_CONFIG = {
     DISTANCE_TOLERANCE: 0.35,
 
     // Fare calculation
-    BASE_FARE: 2.50,
     PER_SEGMENT_RATE: 0.40,
-    MILE_IN_METERS: 1609.344,
     FIFTH_MILE_METERS: 1609.344 / 5,
 
     // Tip system
@@ -44,7 +42,7 @@ const MISSION_CONFIG = {
     NEXT_MISSION_DELAY_MS: 3000,
     LOOP_INTERVAL_MS: 100,
     ANIM_LOAD_TIMEOUT: 2000,
-    GRACE_PERIOD_MS: 25000,
+
 } as const;
 
 /** Debug categories */
@@ -235,8 +233,6 @@ let missionData: PassengerMissionData = {
     pickupLocation: null,
     destination: null,
 };
-let lastLocation: Vector3 | null = null;
-let currentDestinationName: string = "";
 let missionMetrics: MissionMetrics = {
     startTime: 0,
     pickupTime: 0,
@@ -245,10 +241,7 @@ let missionMetrics: MissionMetrics = {
     attemptCount: 0,
 };
 
-let gracePeriodStartTime: number = -1;
-let wasInGracePeriod: boolean = false;
-let lastCountdownDisplayed: number = -1;
-let vehicleHealthAtPickup: number = 1000;
+
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -269,7 +262,6 @@ function isValidPassenger(char: Char): boolean {
         return false;
     }
 
-    // FIXED: Use IS_CHAR_FATALLY_INJURED pattern from Vigilante
     if (char.isFatallyInjured()) {
         debugEx("PASSENGER", "Char fatally injured, skipping");
         return false;
@@ -328,45 +320,6 @@ function getRandomPointAtDistance(origin: Vector3, distance: number): Vector3 {
         y: origin.y + offsetY,
         z: origin.z + MISSION_CONFIG.PASSENGER_SPAWN_HEIGHT,
     };
-}
-
-function getValidCarNode(point: Vector3): Vector3 | null {
-    const nodeResult = Path.GetNextClosestCarNode(point.x, point.y, point.z);
-
-    if (nodeResult && (nodeResult.x !== 0 !== undefined)) {
-        return {
-            x: nodeResult.x || point.x,
-            y: nodeResult.y || point.y,
-            z: nodeResult.z || point.z,
-        };
-    }
-
-    debugEx("MOVEMENT", "GetNextClosestCarNode failed, trying fallback...");
-
-    const fallback = Path.GetClosestCarNode(point.x, point.y, point.z);
-
-    if (fallback && fallback.pResX !== 0) {
-        debugEx("MOVEMENT", "Using GetClosestCarNode fallback");
-        return {
-            x: fallback.pResX,
-            y: fallback.pResY,
-            z: fallback.pResZ,
-        };
-    }
-
-    const headingFallback = Path.GetClosestCarNodeWithHeading(point.x, point.y, point.z);
-
-    if (headingFallback && headingFallback.pResX !== 0) {
-        debugEx("MOVEMENT", "Using GetClosestCarNodeWithHeading fallback");
-        return {
-            x: headingFallback.pResX,
-            y: headingFallback.pResY,
-            z: headingFallback.pResZ,
-        };
-    }
-
-    debugEx("ERROR", "All path node methods failed");
-    return null;
 }
 
 function getTaxiHailDirection(passenger: Char, vehicle: Car): "HAIL_LEFT" | "HAIL_RIGHT" {
@@ -440,15 +393,53 @@ function getDestination(origin: Vector3, targetDistance: number): Location | nul
     if (Math.random() < 0.5) {
         return findDestinationByDistance(origin, targetDistance);
     } else {
-        const randomCoords = getRandomPointAtDistance(origin, targetDistance);
-        const nearestDriveablePosition = Path.GetNextClosestCarNode(randomCoords.x, randomCoords.y, randomCoords.z);
+        const randomCoords = getValidCarNode(getRandomPointAtDistance(origin, targetDistance));
         return {
             name: "Random Location",
-            coords: nearestDriveablePosition,
+            coords: randomCoords,
             probability: 0
         };
     }
 }
+
+ function getValidCarNode(point: Vector3): Vector3 | null {
+     const nodeResult = Path.GetNextClosestCarNode(point.x, point.y, point.z);
+
+     if (nodeResult && (nodeResult.x !== 0 !== undefined)) {
+         return {
+             x: nodeResult.x || point.x,
+             y: nodeResult.y || point.y,
+             z: nodeResult.z || point.z,
+         };
+     }
+
+     debugEx("MOVEMENT", "GetNextClosestCarNode failed, trying fallback...");
+
+     const fallback = Path.GetClosestCarNode(point.x, point.y, point.z);
+
+     if (fallback && fallback.pResX !== 0) {
+         debugEx("MOVEMENT", "Using GetClosestCarNode fallback");
+         return {
+             x: fallback.pResX,
+             y: fallback.pResY,
+             z: fallback.pResZ,
+         };
+     }
+
+     const headingFallback = Path.GetClosestCarNodeWithHeading(point.x, point.y, point.z);
+
+     if (headingFallback && headingFallback.pResX !== 0) {
+         debugEx("MOVEMENT", "Using GetClosestCarNodeWithHeading fallback");
+         return {
+             x: headingFallback.pResX,
+             y: headingFallback.pResY,
+             z: headingFallback.pResZ,
+         };
+     }
+
+     debugEx("ERROR", "All path node methods failed");
+     return null;
+ }
 
 function calculateFare(distanceMeters: number): number {
     const adjustedDistance = Math.min(distanceMeters, MISSION_CONFIG.MAX_DISTANCE);
@@ -498,29 +489,6 @@ function calculateTip(fare: number, currentVehicleHealth: number): Tip {
     return {amount: Math.round(tip * 100) / 100, reason: null};
 }
 
-function getBestPassengerSeat(vehicle: Car): number {
-    const maxPassengers = vehicle.getMaximumNumberOfPassengers();
-
-    if (maxPassengers >= 2) {
-        if (vehicle.isPassengerSeatFree(1)) {
-            debugEx("PASSENGER", "Using rear left seat (1)");
-            return 1;
-        }
-        if (maxPassengers >= 3 && vehicle.isPassengerSeatFree(2)) {
-            debugEx("PASSENGER", "Using rear right seat (2)");
-            return 2;
-        }
-    }
-
-    if (vehicle.isPassengerSeatFree(0)) {
-        debugEx("PASSENGER", "Back seats full, using front passenger seat (0)");
-        return 0;
-    }
-
-    debugEx("ERROR", "No passenger seats available!");
-    return -2;
-}
-
 // ============================================================================
 // MISSION CONTROL FUNCTIONS
 // ============================================================================
@@ -544,7 +512,6 @@ function startTaxiMission(): boolean {
     const player = getPlayerChar();
 
     const startLocation = player.getCoordinates();
-    lastLocation = {...startLocation};
 
     debugEx("MISSION", "Mission start location:", startLocation);
 
@@ -600,9 +567,8 @@ function startTaxiMission(): boolean {
         return false;
     }
 
-    currentDestinationName = selectedLoc.name;
     missionData.destination = selectedLoc.coords;
-    debugEx("MOVEMENT", `Fare #${distanceMultiplier}: ${currentDestinationName} (${nextMissionDistance.toFixed(0)}m target)`);
+    debugEx("MOVEMENT", `Fare #${distanceMultiplier}: ${selectedLoc.name} (${nextMissionDistance.toFixed(0)}m target)`);
 
     safeRemoveBlip(missionData.pickupBlip);
     safeRemoveBlip(missionData.destinationBlip);
@@ -739,7 +705,6 @@ function taxiMissionMainLoop(): void {
 
             const hailDirection = getTaxiHailDirection(missionData.passenger, playerVehicle);
 
-            // FIXED: Use correct side seats - passenger enters from side they're standing on
             // GTA IV seat indices: 0 = front passenger (right), 1 = rear left (left), 2 = rear right (right), 3 = far right
             // When passenger hails from RIGHT side (HAIL_RIGHT) → use right side seats (0 or 2)
             // When passenger hails from LEFT side (HAIL_LEFT) → use left side seats (1 or 3)
@@ -772,9 +737,14 @@ function taxiMissionMainLoop(): void {
     // ========================================================================
     // PHASE 2: Validate pickup success
     // ========================================================================
+    if (!player.isInTaxi()) {
+        debugEx("ERROR", "Player left taxi during pickup");
+        endMissionEarly();
+        return;
+    }
+
     if (
         !Char.DoesExist(missionData.passenger) ||
-        !player.isInTaxi() ||
         !missionData.passenger.isInTaxi()
     ) {
         debugEx("ERROR", "Pickup failed - passenger not in taxi");
@@ -785,8 +755,8 @@ function taxiMissionMainLoop(): void {
     missionData.pickupLocation = {...player.getCoordinates()};
     missionMetrics.pickupTime = Date.now();
 
-    vehicleHealthAtPickup = playerVehicle.getHealth();
-    debugEx("MISSION", "Passenger picked up at", missionData.pickupLocation, `| Vehicle health: ${vehicleHealthAtPickup}`);
+    const currentVehicleHealth = playerVehicle.getHealth();
+    debugEx("MISSION", "Passenger picked up at", missionData.pickupLocation, `| Vehicle health: ${currentVehicleHealth}`);
 
     safeRemoveBlip(missionData.pickupBlip);
 
@@ -865,10 +835,16 @@ function taxiMissionMainLoop(): void {
 
         wait(MISSION_CONFIG.LOOP_INTERVAL_MS);
     }
+
+    if (!player.isInTaxi() && missionState !== TaxiMissionState.Completed && missionState !== TaxiMissionState.Failed) {
+        debugEx("ERROR", "Player left taxi during dropoff");
+        endMissionEarly();
+        return;
+    }
 }
 
 // ============================================================================
-// FIXED: completeTaxiMission with proper null handling
+// MISSION COMPLETION FUNCTIONS
 // ============================================================================
 
 function completeTaxiMission(distanceTravelled: number): void {
@@ -877,7 +853,6 @@ function completeTaxiMission(distanceTravelled: number): void {
 
     const fare = calculateFare(distanceTravelled);
 
-    // FIXED: Initialize tip with default value to prevent undefined access
     let tip: Tip = {amount: 0, reason: null};
     let currentVehicleHealth = 1000;
 
@@ -888,7 +863,6 @@ function completeTaxiMission(distanceTravelled: number): void {
 
     const totalEarnings = fare + tip.amount;
 
-    // FIXED: Use addScore with proper money type if available
     try {
         getPlayer().addScore(totalEarnings);
     } catch (e) {
@@ -911,37 +885,30 @@ function completeTaxiMission(distanceTravelled: number): void {
         `Mission complete! Fare: ${fare.toFixed(2)}, Tip: ${tip.amount.toFixed(2)}, Total: ${totalEarnings.toFixed(2)}, Distance: ${distanceTravelled.toFixed(0)}m, Trip Time: ${tripTimeSec.toFixed(1)}s`
     );
 
-    if (missionData.destination) {
-        lastLocation = {...missionData.destination};
-    }
-
     distanceMultiplier = Math.min(distanceMultiplier + 1, 20);
 
-    // FIXED: Follow Vigilante cleanup order - vehicle cleanup BEFORE char cleanup
-    // 1. Make passenger leave car first
+    cleanupPassengerAndBlips();
+
+    missionState = TaxiMissionState.Completed;
+}
+
+function cleanupPassengerAndBlips(): void {
     if (missionData.passenger && Char.DoesExist(missionData.passenger)) {
         if (missionData.passenger.isInAnyCar()) {
             Task.LeaveAnyCar(missionData.passenger);
             wait(500);
         }
 
-        // 2. Then wander
         Task.WanderStandard(missionData.passenger);
         missionData.passenger.sayAmbientSpeech("TAXI_BAIL", true, true, false);
-
-        // 3. Finally mark as no longer needed
         missionData.passenger.markAsNoLongerNeeded();
         missionData.passenger = null;
     }
 
-    // Clean up blips
     safeRemoveBlip(missionData.pickupBlip);
     safeRemoveBlip(missionData.destinationBlip);
-
     missionData.pickupBlip = null;
     missionData.destinationBlip = null;
-
-    missionState = TaxiMissionState.Completed;
 }
 
 function handleMissionFailure(reason: string): void {
@@ -950,25 +917,51 @@ function handleMissionFailure(reason: string): void {
     showTextBox(`Taxi mission failed. ${reason}`);
     missionState = TaxiMissionState.Failed;
 
-    // Same cleanup order as completeTaxiMission
-    if (missionData.passenger && Char.DoesExist(missionData.passenger)) {
-        if (missionData.passenger.isInAnyCar()) {
-            Task.LeaveAnyCar(missionData.passenger);
-            wait(500);
-        }
-
-        Task.WanderStandard(missionData.passenger);
-        missionData.passenger.sayAmbientSpeech("TAXI_BAIL", true, true, false);
-        missionData.passenger.markAsNoLongerNeeded();
-        missionData.passenger = null;
-    }
-
-    safeRemoveBlip(missionData.pickupBlip);
-    safeRemoveBlip(missionData.destinationBlip);
-    missionData.pickupBlip = null;
-    missionData.destinationBlip = null;
+    cleanupPassengerAndBlips();
 
     distanceMultiplier = 1;
+    resetMissionState();
+}
+
+
+function endMissionEarly(): void {
+    debugEx("MISSION", "Ending mission early - player left taxi");
+
+    const player = getPlayerChar();
+    const playerVehicle = player.getCarIsUsing();
+
+    let distanceTravelled = 0;
+    if (missionData.pickupLocation && playerVehicle && Car.DoesExist(playerVehicle)) {
+        distanceTravelled = getDistanceBetweenTwoVectors(
+            missionData.pickupLocation,
+            player.getCoordinates()
+        );
+    }
+
+    const fare = calculateFare(distanceTravelled);
+    let tip: Tip = { amount: 0, reason: null };
+    let currentVehicleHealth = 1000;
+
+    if (playerVehicle && Car.DoesExist(playerVehicle)) {
+        currentVehicleHealth = playerVehicle.getHealth();
+        tip = calculateTip(fare, currentVehicleHealth);
+    }
+
+    const totalEarnings = fare + tip.amount;
+
+    try {
+        getPlayer().addScore(totalEarnings);
+    } catch (e) {
+        debugEx("ERROR", "Failed to add score: " + String(e));
+    }
+
+    showTextBox(`Mission Ended! You left the taxi. Total earned: $${totalEarnings.toFixed(2)}`);
+    debugEx("MISSION", `Mission ended early. Distance: ${distanceTravelled.toFixed(0)}m, Fare: ${fare.toFixed(2)}, Tip: ${tip.amount.toFixed(2)}, Total: ${totalEarnings.toFixed(2)}`);
+
+    cleanupPassengerAndBlips();
+
+    distanceMultiplier = 1;
+    missionState = TaxiMissionState.Failed;
     resetMissionState();
 }
 
@@ -976,9 +969,6 @@ function resetMissionState(): void {
     debugEx("STATE", "Resetting mission state");
 
     missionState = TaxiMissionState.Idle;
-
-    gracePeriodStartTime = -1;
-    wasInGracePeriod = false;
 
     missionData.passenger = null;
     missionData.pickupBlip = null;
@@ -1001,13 +991,6 @@ try {
         const player = getPlayerChar();
 
         if (isPlayerDrivingAnyCar() && player.isInTaxi()) {
-            if (wasInGracePeriod && gracePeriodStartTime !== -1) {
-                debugEx("STATE", "Player returned to taxi - cancelling grace period");
-                gracePeriodStartTime = -1;
-                wasInGracePeriod = false;
-                lastCountdownDisplayed = -1;
-            }
-
             let promptShown = false;
 
             while (player.isInTaxi()) {
@@ -1077,78 +1060,12 @@ try {
                 }
             }
 
-            // Grace period handling when player exits taxi
-            if (
-                missionState !== TaxiMissionState.Idle &&
-            // @ts-ignore
-                missionState !== TaxiMissionState.Completed &&
-            // @ts-ignore
-                missionState !== TaxiMissionState.Failed
-            ) {
-                if (gracePeriodStartTime === -1) {
-                    gracePeriodStartTime = Date.now();
-                    wasInGracePeriod = true;
-                    debugEx("STATE", "Player exited taxi - starting 25s grace period");
-                }
-
-                const timeInGrace = Date.now() - gracePeriodStartTime;
-                if (timeInGrace >= MISSION_CONFIG.GRACE_PERIOD_MS) {
-                    debugEx("ERROR", "Grace period expired");
-                    handleMissionFailure("You left the taxi.");
-                    gracePeriodStartTime = -1;
-                    wasInGracePeriod = false;
-                } else {
-                    const remainingSec = Math.ceil(
-                        (MISSION_CONFIG.GRACE_PERIOD_MS - timeInGrace) / 1000
-                    );
-                    if (remainingSec !== lastCountdownDisplayed) {
-                        lastCountdownDisplayed = remainingSec;
-                        showTextBox(`Get back in the taxi! ${remainingSec}s remaining`);
-                    }
-                }
-            } else {
-                gracePeriodStartTime = -1;
-                wasInGracePeriod = false;
-                lastCountdownDisplayed = -1;
-            }
-        } else {
-            if (
-                missionState !== TaxiMissionState.Idle &&
-            // @ts-ignore
-                missionState !== TaxiMissionState.Completed &&
-            // @ts-ignore
-                missionState !== TaxiMissionState.Failed
-            ) {
-                if (gracePeriodStartTime === -1) {
-                    gracePeriodStartTime = Date.now();
-                    wasInGracePeriod = true;
-                    debugEx("STATE", "Player not in taxi - starting 25s grace period");
-                }
-
-                const timeInGrace = Date.now() - gracePeriodStartTime;
-                if (timeInGrace >= MISSION_CONFIG.GRACE_PERIOD_MS) {
-                    debugEx("ERROR", "Grace period expired");
-                    handleMissionFailure("You left the taxi.");
-                    gracePeriodStartTime = -1;
-                    wasInGracePeriod = false;
-                } else {
-                    const remainingSec = Math.ceil(
-                        (MISSION_CONFIG.GRACE_PERIOD_MS - timeInGrace) / 1000
-                    );
-                    if (remainingSec !== lastCountdownDisplayed) {
-                        lastCountdownDisplayed = remainingSec;
-                        showTextBox(`Get back in the taxi! ${remainingSec}s remaining`);
-                    }
-                }
-            } else {
-                gracePeriodStartTime = -1;
-                wasInGracePeriod = false;
-                lastCountdownDisplayed = -1;
+            if (missionState === TaxiMissionState.TakingFare) {
+                endMissionEarly();
             }
         }
     }
 } catch (error) {
-    // FIXED: Improved error logging with more details
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : "";
 
