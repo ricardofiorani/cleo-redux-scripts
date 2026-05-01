@@ -1,9 +1,8 @@
-import {getPlayer, getPlayerChar, isPlayerDrivingAnyCar} from "./libs/player";
-// @ts-ignore
-import {Key} from ".config/enums.js";
+ import {getPlayer, getPlayerChar, isPlayerDrivingAnyCar} from "./libs/player";
 import {getDistanceBetweenTwoVectors} from "./libs/utils";
 import {safeRemoveBlip, BlipColors} from "./libs/blips";
 import {getPedModelName} from "./libs/models";
+import { Key } from "./.config/enums";
 
 // ============================================================================
 // CONFIGURATION CONSTANTS
@@ -287,6 +286,7 @@ function isValidPassenger(char: Char): boolean {
 function findPassengerAround(point: Vector3, searchRange: number): Char | null {
     debugEx("PASSENGER", `Searching for passenger around`, point, `radius: ${searchRange}m`);
 
+    // @ts-ignore
     const pedId = native<int>(
         "GET_RANDOM_CHAR_IN_AREA_OFFSET_NO_SAVE",
         point.x,
@@ -436,6 +436,20 @@ function findDestinationByDistance(origin: Vector3, targetDistance: number): Loc
     return null;
 }
 
+function getDestination(origin: Vector3, targetDistance: number): Location | null {
+    if (Math.random() < 0.5) {
+        return findDestinationByDistance(origin, targetDistance);
+    } else {
+        const randomCoords = getRandomPointAtDistance(origin, targetDistance);
+        const nearestDriveablePosition = Path.GetNextClosestCarNode(randomCoords.x, randomCoords.y, randomCoords.z);
+        return {
+            name: "Random Location",
+            coords: nearestDriveablePosition,
+            probability: 0
+        };
+    }
+}
+
 function calculateFare(distanceMeters: number): number {
     const adjustedDistance = Math.min(distanceMeters, MISSION_CONFIG.MAX_DISTANCE);
 
@@ -514,7 +528,9 @@ function getBestPassengerSeat(vehicle: Car): number {
 function startTaxiMission(): boolean {
     debugEx("MISSION", "Starting taxi mission...");
 
+    // @ts-ignore
     const taxiScriptCount = native<int>("GET_NUMBER_OF_INSTANCES_OF_STREAMED_SCRIPT", "taxi");
+    // @ts-ignore
     const romanTaxiCount = native<int>("GET_NUMBER_OF_INSTANCES_OF_STREAMED_SCRIPT", "roman_taxi");
 
     if (taxiScriptCount > 0 || romanTaxiCount > 0) {
@@ -575,7 +591,7 @@ function startTaxiMission(): boolean {
 
     debugEx("PASSENGER", `Passenger found after ${missionMetrics.attemptCount} attempts`);
 
-    const selectedLoc = findDestinationByDistance(startLocation, nextMissionDistance);
+    const selectedLoc = getDestination(startLocation, nextMissionDistance);
 
     if (!selectedLoc) {
         debugEx("ERROR", "Failed to find any destination");
@@ -604,7 +620,9 @@ function requestAnimations(): void {
 
     const startWait = Date.now();
     while (
+        // @ts-ignore
         !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_M") ||
+        // @ts-ignore
         !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_F")
         ) {
         if (Date.now() - startWait > MISSION_CONFIG.ANIM_LOAD_TIMEOUT) {
@@ -1030,6 +1048,7 @@ try {
                 // ========================================================================
                 // STATE: Completed
                 // ========================================================================
+                // @ts-ignore
                 if (missionState === TaxiMissionState.Completed) {
                     wait(MISSION_CONFIG.NEXT_MISSION_DELAY_MS);
 
@@ -1051,6 +1070,7 @@ try {
                 // ========================================================================
                 // STATE: Failed
                 // ========================================================================
+                // @ts-ignore
                 if (missionState === TaxiMissionState.Failed) {
                     wait(1000);
                     resetMissionState();
@@ -1060,7 +1080,9 @@ try {
             // Grace period handling when player exits taxi
             if (
                 missionState !== TaxiMissionState.Idle &&
+            // @ts-ignore
                 missionState !== TaxiMissionState.Completed &&
+            // @ts-ignore
                 missionState !== TaxiMissionState.Failed
             ) {
                 if (gracePeriodStartTime === -1) {
@@ -1092,7 +1114,9 @@ try {
         } else {
             if (
                 missionState !== TaxiMissionState.Idle &&
+            // @ts-ignore
                 missionState !== TaxiMissionState.Completed &&
+            // @ts-ignore
                 missionState !== TaxiMissionState.Failed
             ) {
                 if (gracePeriodStartTime === -1) {
