@@ -324,7 +324,7 @@ function getRandomPointAtDistance(origin: Vector3, distance: number): Vector3 {
 
 function getTaxiHailDirection(passenger: Char, vehicle: Car): "HAIL_LEFT" | "HAIL_RIGHT" {
     const direction = getTaxiDirectionReference(passenger, vehicle);
-    return direction === 1 ? "HAIL_LEFT" : "HAIL_RIGHT";
+    return direction === 1 ? "HAIL_RIGHT" : "HAIL_LEFT";
 }
 
 function getTaxiDirectionReference(passenger: Char, vehicle: Car): number {
