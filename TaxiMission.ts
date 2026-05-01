@@ -20,6 +20,7 @@ const MISSION_CONFIG = {
     MIN_DISTANCE: 200,
     DISTANCE_STEP: 100,
     MAX_DISTANCE: 6500,
+    DISTANCE_TOLERANCE: 0.35,
 
     // Fare calculation
     BASE_FARE: 2.50,
@@ -222,10 +223,6 @@ function debugEx(category: DebugCategoryKey, message: string, ...params: any[]):
     log(`${prefix} ${formatted}`);
 }
 
-const debug = (message: string, ...params: any[]) => {
-    debugEx("MISSION", message, ...params);
-};
-
 // ============================================================================
 // GLOBAL STATE
 // ============================================================================
@@ -402,6 +399,43 @@ function getNextMissionDistance(multiplier: number): number {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function findDestinationByDistance(origin: Vector3, targetDistance: number): Location | null {
+    const tolerance = MISSION_CONFIG.DISTANCE_TOLERANCE;
+    const minRange = targetDistance * (1 - tolerance);
+    const maxRange = targetDistance * (1 + tolerance);
+
+    let candidates: { location: Location, distance: number }[] = [];
+
+    for (const loc of ImportantLocations) {
+        const dist = getDistanceBetweenTwoVectors(origin, loc.coords);
+        if (dist >= minRange && dist <= maxRange) {
+            candidates.push({ location: loc, distance: dist });
+        }
+    }
+
+    if (candidates.length > 0) {
+        candidates.sort((a, b) => Math.abs(a.distance - targetDistance) - Math.abs(b.distance - targetDistance));
+        const best = candidates[0];
+        debugEx("MOVEMENT", `Found destination within target range: ${best.location.name} (${best.distance.toFixed(0)}m, target: ${targetDistance.toFixed(0)}m)`);
+        return best.location;
+    }
+
+    let closest: { location: Location, distance: number } | null = null;
+    for (const loc of ImportantLocations) {
+        const dist = getDistanceBetweenTwoVectors(origin, loc.coords);
+        if (!closest || dist < closest.distance) {
+            closest = { location: loc, distance: dist };
+        }
+    }
+
+    if (closest) {
+        debugEx("MOVEMENT", `No destination in target range, using closest: ${closest.location.name} (${closest.distance.toFixed(0)}m, target: ${targetDistance.toFixed(0)}m)`);
+        return closest.location;
+    }
+
+    return null;
+}
+
 function calculateFare(distanceMeters: number): number {
     const adjustedDistance = Math.min(distanceMeters, MISSION_CONFIG.MAX_DISTANCE);
 
@@ -515,6 +549,7 @@ function startTaxiMission(): boolean {
         destination: null,
     };
 
+
     while (!missionData.passenger || !Char.DoesExist(missionData.passenger)) {
         const searchRadius =
             missionMetrics.attemptCount * MISSION_CONFIG.BASE_SEARCH_RADIUS +
@@ -540,19 +575,18 @@ function startTaxiMission(): boolean {
 
     debugEx("PASSENGER", `Passenger found after ${missionMetrics.attemptCount} attempts`);
 
-    const randomLoc = ImportantLocations[Math.floor(Math.random() * ImportantLocations.length)];
-    currentDestinationName = randomLoc.name;
-    const destination = randomLoc.coords;
+    const selectedLoc = findDestinationByDistance(startLocation, nextMissionDistance);
 
-    if (!destination) {
-        debugEx("ERROR", "Failed to get destination node");
+    if (!selectedLoc) {
+        debugEx("ERROR", "Failed to find any destination");
         missionData.passenger.markAsNoLongerNeeded();
         missionData.passenger = null;
         return false;
     }
 
-    missionData.destination = destination;
-    debugEx("MOVEMENT", "Destination set to:", destination);
+    currentDestinationName = selectedLoc.name;
+    missionData.destination = selectedLoc.coords;
+    debugEx("MOVEMENT", `Fare #${distanceMultiplier}: ${currentDestinationName} (${nextMissionDistance.toFixed(0)}m target)`);
 
     safeRemoveBlip(missionData.pickupBlip);
     safeRemoveBlip(missionData.destinationBlip);
