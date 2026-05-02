@@ -53,6 +53,7 @@ const DebugCategory = {
     FARE: "FARE",
     STATE: "STATE",
     ERROR: "ERROR",
+    FATAL: "FATAL",
 } as const;
 
 type DebugCategoryKey = keyof typeof DebugCategory;
@@ -240,6 +241,8 @@ let missionMetrics: MissionMetrics = {
     totalDistance: 0,
     attemptCount: 0,
 };
+let wasDamagedThisFare = false;
+let lastDamageWarningTime = 0;
 
 
 
@@ -458,14 +461,14 @@ interface Tip {
     reason: string | null;
 }
 
-function calculateTip(fare: number, currentVehicleHealth: number): Tip {
+function calculateTip(fare: number, currentVehicleHealth: number, damagedDuringFare: boolean): Tip {
     const maxHealth = 1000;
     const healthPercent = currentVehicleHealth / maxHealth;
     const healthPercentInt = Math.round(healthPercent * 100);
 
     debugEx("FARE", `Vehicle health: ${currentVehicleHealth}/${maxHealth} = ${healthPercentInt}%`);
 
-    if (healthPercent < MISSION_CONFIG.DAMAGE_THRESHOLD) {
+    if (damagedDuringFare || healthPercent < MISSION_CONFIG.DAMAGE_THRESHOLD) {
         const reason = `Vehicle too damaged (${healthPercentInt}% < 80%)`;
         debugEx("FARE", `No tip - ${reason}`);
         showTextBox("No tip: Vehicle was too damaged!");
@@ -523,6 +526,8 @@ function startTaxiMission(): boolean {
     missionMetrics.dropoffTime = 0;
     missionMetrics.totalDistance = 0;
     missionMetrics.attemptCount = 0;
+    wasDamagedThisFare = false;
+    lastDamageWarningTime = 0;
 
     missionData = {
         passenger: null,
@@ -687,7 +692,7 @@ function taxiMissionMainLoop(): void {
                 animDict,
                 8.0,
                 false,
-                true,
+                false,
                 false,
                 true,
                 -2
@@ -743,6 +748,12 @@ function taxiMissionMainLoop(): void {
         return;
     }
 
+    if(missionData.passenger.isFatallyInjured() || missionData.passenger.isDead()) {
+        debugEx("ERROR", "Passenger died during pickup");
+        endMissionEarly();
+        return;
+    }
+
     if (
         !Char.DoesExist(missionData.passenger) ||
         !missionData.passenger.isInTaxi()
@@ -788,6 +799,15 @@ function taxiMissionMainLoop(): void {
         if (failReason) {
             handleMissionFailure(failReason);
             return;
+        }
+
+        const currentHealth = playerVehicle.getHealth();
+        const healthPercent = currentHealth / 1000;
+        if (healthPercent < MISSION_CONFIG.DAMAGE_THRESHOLD && !wasDamagedThisFare) {
+            wasDamagedThisFare = true;
+            lastDamageWarningTime = Date.now();
+        } else if (wasDamagedThisFare && Date.now() - lastDamageWarningTime > 5000) { //case the player fixes the car
+            lastDamageWarningTime = Date.now();
         }
 
         if (missionData.destinationBlip && missionData.destination) {
@@ -858,7 +878,7 @@ function completeTaxiMission(distanceTravelled: number): void {
 
     if (playerVehicle && Car.DoesExist(playerVehicle)) {
         currentVehicleHealth = playerVehicle.getHealth();
-        tip = calculateTip(fare, currentVehicleHealth);
+        tip = calculateTip(fare, currentVehicleHealth, wasDamagedThisFare);
     }
 
     const totalEarnings = fare + tip.amount;
@@ -944,17 +964,12 @@ function endMissionEarly(): void {
 
     if (playerVehicle && Car.DoesExist(playerVehicle)) {
         currentVehicleHealth = playerVehicle.getHealth();
-        tip = calculateTip(fare, currentVehicleHealth);
+        tip = calculateTip(fare, currentVehicleHealth, wasDamagedThisFare);
     }
 
     const totalEarnings = fare + tip.amount;
 
-    try {
-        getPlayer().addScore(totalEarnings);
-    } catch (e) {
-        debugEx("ERROR", "Failed to add score: " + String(e));
-    }
-
+    getPlayer().addScore(totalEarnings);
     showTextBox(`Mission Ended! You left the taxi. Total earned: $${totalEarnings.toFixed(2)}`);
     debugEx("MISSION", `Mission ended early. Distance: ${distanceTravelled.toFixed(0)}m, Fare: ${fare.toFixed(2)}, Tip: ${tip.amount.toFixed(2)}, Total: ${totalEarnings.toFixed(2)}`);
 
@@ -1069,12 +1084,12 @@ try {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : "";
 
-    debugEx("ERROR", `Caught error: ${errorMessage}`);
+    debugEx("FATAL", `Caught fatal error: ${errorMessage}`);
     if (errorStack) {
         debugEx("ERROR", `Stack: ${errorStack}`);
     }
 
-    log("Error in TaxiMission script: " + errorMessage);
+    log("Fatal Error in TaxiMission script: " + errorMessage);
 
     // Attempt graceful cleanup on error
     try {
@@ -1083,5 +1098,5 @@ try {
         log("Additional error during cleanup: " + String(cleanupError));
     }
 
-    showTextBox("An error occurred in the Taxi Mission script. Please check the logs.");
+    showTextBox("A fatal error occurred in the Taxi Mission script. Please check the logs.");
 }
