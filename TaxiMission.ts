@@ -728,7 +728,7 @@ function taxiMissionMainLoop(): void {
             Task.EnterCarAsPassenger(
                 missionData.passenger,
                 playerVehicle,
-                10000,
+                -1,
                 seatIndex
             );
 
