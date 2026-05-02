@@ -4,7 +4,7 @@
  * Press G to enter the nearest car in the passenger seat.
  */
 
-import {Key} from ".config/enums";
+import {Key} from "./.config/enums";
 import {getPlayerChar, isPlayerInAnyCar} from "./libs/player";
 import {getFreePassengerSeat} from "./libs/vehicle";
 import {getNearestCarToChar} from "./libs/utils";

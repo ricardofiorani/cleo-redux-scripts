@@ -5,7 +5,7 @@
  * Press Numpad9 to toggle ragdoll state.
  */
 
-import {Key} from "./.config/enums";
+import {Key} from ".config/enums";
 import {getPlayer, getPlayerChar} from "./libs/player";
 
 /**
@@ -30,6 +30,8 @@ while (true) {
             log("Exiting ragdoll state");
             playerChar.switchToAnimated(false);
         }
+
+        wait(1000); // Wait for a second to allow the ragdoll state to change
     }
 
     invencibleWhenRagdollOrAir && makeCharInvincibleIfInAirOrRagdoll().catch(log);

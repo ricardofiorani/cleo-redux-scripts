@@ -1,9 +1,11 @@
-import {Key} from "./.config/enums";
+import {Key} from ".config/enums";
 import {getPlayer, getPlayerChar} from "./libs/player";
 import {applyForce} from "./libs/physics";
 import {addParticleFXToChar, stopParticleFxOnChar} from "./libs/utils";
 import {Bone} from "./libs/bone";
 import {CameraAssistant} from "./libs/camera";
+
+let ENABLED = true
 
 let forceStrength = 60;
 let particlesPointer;
@@ -50,6 +52,10 @@ const enableSlowMo = (makeInvincible: boolean) => {
 
 while (true) {
     wait(100);
+
+    if (!ENABLED) {
+        continue;
+    }
 
     if (Pad.IsGameKeyboardKeyPressed(Key.NumpadPlus)) {
         forceStrength += 1;
