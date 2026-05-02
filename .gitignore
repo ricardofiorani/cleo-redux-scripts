@@ -4,5 +4,7 @@ CLEO_PLUGINS
 CLEO_TEXT
 !CLEO_TEXT/.gitkeep
 playground.ts
-#reference
+reference
 .kilocode
+.kilo
+AGENTS.ai.md

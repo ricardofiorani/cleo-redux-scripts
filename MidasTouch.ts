@@ -1,5 +1,5 @@
-import {getCarThatCharIsTouching, getCharGettingTargetedByPlayer, isTouchingAnyCar} from "../libs/utils";
-import {getPlayerChar} from "../libs/player";
+import {getCarThatCharIsTouching, getCharGettingTargetedByPlayer, isTouchingAnyCar} from "./libs/utils";
+import {getPlayerChar} from "./libs/player";
 
 const enabled = false;
 

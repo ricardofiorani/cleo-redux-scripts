@@ -1,5 +1,5 @@
  import {getPlayer, getPlayerChar, isPlayerDrivingAnyCar} from "./libs/player";
-import {getDistanceBetweenTwoVectors} from "./libs/utils";
+import {getDistanceBetweenTwoVectors, getStreetNameFromCoords} from "./libs/utils";
 import {safeRemoveBlip, BlipColors} from "./libs/blips";
 import {getPedModelName} from "./libs/models";
 import { Key } from "./.config/enums";
@@ -187,6 +187,8 @@ interface PassengerMissionData {
     destinationBlip: Blip | null;
     pickupLocation: Vector3 | null;
     destination: Vector3 | null;
+    distanceTravelled: number;
+    totalEarned: number;
 }
 
 // ============================================================================
@@ -233,6 +235,8 @@ let missionData: PassengerMissionData = {
     destinationBlip: null,
     pickupLocation: null,
     destination: null,
+    distanceTravelled: 0,
+    totalEarned: 0,
 };
 let missionMetrics: MissionMetrics = {
     startTime: 0,
@@ -535,6 +539,8 @@ function startTaxiMission(): boolean {
         destinationBlip: null,
         pickupLocation: null,
         destination: null,
+        totalEarned: 0,
+        distanceTravelled: 0,
     };
 
 
@@ -782,6 +788,8 @@ function taxiMissionMainLoop(): void {
     }
 
     missionData.passenger.sayAmbientSpeech("TAXI_START", true, true, false);
+    const streetName = getStreetNameFromCoords(missionData.destination);
+    showTextBox(`Drive the passenger to ${streetName}`);
 
     // ========================================================================
     // PHASE 3: Driving to destination
@@ -885,6 +893,8 @@ function completeTaxiMission(distanceTravelled: number): void {
 
     try {
         getPlayer().addScore(totalEarnings);
+        missionData.totalEarned = totalEarnings;
+        missionData.distanceTravelled = distanceTravelled;
     } catch (e) {
         debugEx("ERROR", "Failed to add score: " + String(e));
     }
@@ -946,32 +956,8 @@ function handleMissionFailure(reason: string): void {
 
 function endMissionEarly(): void {
     debugEx("MISSION", "Ending mission early - player left taxi");
-
-    const player = getPlayerChar();
-    const playerVehicle = player.getCarIsUsing();
-
-    let distanceTravelled = 0;
-    if (missionData.pickupLocation && playerVehicle && Car.DoesExist(playerVehicle)) {
-        distanceTravelled = getDistanceBetweenTwoVectors(
-            missionData.pickupLocation,
-            player.getCoordinates()
-        );
-    }
-
-    const fare = calculateFare(distanceTravelled);
-    let tip: Tip = { amount: 0, reason: null };
-    let currentVehicleHealth = 1000;
-
-    if (playerVehicle && Car.DoesExist(playerVehicle)) {
-        currentVehicleHealth = playerVehicle.getHealth();
-        tip = calculateTip(fare, currentVehicleHealth, wasDamagedThisFare);
-    }
-
-    const totalEarnings = fare + tip.amount;
-
-    getPlayer().addScore(totalEarnings);
-    showTextBox(`Mission Ended! You left the taxi. Total earned: $${totalEarnings.toFixed(2)}`);
-    debugEx("MISSION", `Mission ended early. Distance: ${distanceTravelled.toFixed(0)}m, Fare: ${fare.toFixed(2)}, Tip: ${tip.amount.toFixed(2)}, Total: ${totalEarnings.toFixed(2)}`);
+    showTextBox(`Mission Ended! You left the taxi. Total earned: $${missionData.totalEarned} - Distance travelled: ${missionData.distanceTravelled}`);
+    debugEx("MISSION", `Mission ended early. Total earned: $${missionData.totalEarned} - Distance travelled: ${missionData.distanceTravelled}`);
 
     cleanupPassengerAndBlips();
 
@@ -990,6 +976,8 @@ function resetMissionState(): void {
     missionData.destinationBlip = null;
     missionData.pickupLocation = null;
     missionData.destination = null;
+    missionData.distanceTravelled = 0;
+    missionData.totalEarned = 0;
 
     Mission.SetFlag(false);
     Mission.TerminateThisScript()
