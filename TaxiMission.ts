@@ -1,12 +1,17 @@
- import {getPlayer, getPlayerChar, isPlayerDrivingAnyCar} from "./libs/player";
+// This is a Taxi Mission script that allows the player to play as a taxi driver when in a taxi vehicle.
+// When in a Taxi, press E to start the taxi mission and pick up passengers.
+// At any moment to stop the Taxi Mission, just leave the vehicle.
+
+import {getPlayer, getPlayerChar, isPlayerDrivingAnyCar} from "./libs/player";
 import {getDistanceBetweenTwoVectors, getStreetNameFromCoords} from "./libs/utils";
 import {safeRemoveBlip, BlipColors} from "./libs/blips";
 import {getPedModelName} from "./libs/models";
-import { Key } from "./.config/enums";
+import {Key} from "./.config/enums";
 
 // ============================================================================
 // CONFIGURATION CONSTANTS
 // ============================================================================
+
 
 /** Mission configuration constants */
 const MISSION_CONFIG = {
@@ -117,47 +122,47 @@ const ImportantLocations: Location[] = [
     },
     {
         name: "Heli-Tour",
-        coords: { "x": 296.9700927734375, "y": -679.6715087890625, "z": 4.204738616943359 },
+        coords: {"x": 296.9700927734375, "y": -679.6715087890625, "z": 4.204738616943359},
         probability: 15
     },
     {
         name: "Castle Gardens",
-        coords: { "x": -155.99966430664062, "y": -801.5526123046875, "z": 4.910671234130859 },
+        coords: {"x": -155.99966430664062, "y": -801.5526123046875, "z": 4.910671234130859},
         probability: 15
     },
     {
         name: "Castle Gardens City",
-        coords: { "x": -511.0885314941406, "y": -270.78411865234375, "z": 7.473130702972412 },
+        coords: {"x": -511.0885314941406, "y": -270.78411865234375, "z": 7.473130702972412},
         probability: 15
     },
     {
         name: "Train Hard Store",
-        coords: { "x": -124.25224304199219, "y": -12.812334060668945, "z": 14.23044204711914 },
+        coords: {"x": -124.25224304199219, "y": -12.812334060668945, "z": 14.23044204711914},
         probability: 15
     },
     {
         name: "Burger Shot",
-        coords: { "x": -175.88717651367188, "y": 272.3224792480469, "z": 14.198423385620117 },
+        coords: {"x": -175.88717651367188, "y": 272.3224792480469, "z": 14.198423385620117},
         probability: 15
     },
     {
         name: "Holland Hospital Center",
-        coords: { "x": -391.6754455566406, "y": 1268.3983154296875, "z": 22.489723205566406 },
+        coords: {"x": -391.6754455566406, "y": 1268.3983154296875, "z": 22.489723205566406},
         probability: 15
     },
     {
         name: "Vespuci Circus",
-        coords: { "x": -208.48712158203125, "y": 1492.4622802734375, "z": 17.86697006225586 },
+        coords: {"x": -208.48712158203125, "y": 1492.4622802734375, "z": 17.86697006225586},
         probability: 15
     },
     {
         name: "Middle Park",
-        coords: { "x": -170.12892150878906, "y": 1178.3424072265625, "z": 14.226988792419434 },
+        coords: {"x": -170.12892150878906, "y": 1178.3424072265625, "z": 14.226988792419434},
         probability: 15
     },
     {
         name: "International Online",
-        coords: { "x": -891.8658447265625, "y": 1039.62744140625, "z": 20.11684226989746 },
+        coords: {"x": -891.8658447265625, "y": 1039.62744140625, "z": 20.11684226989746},
         probability: 15
     }
 ]
@@ -247,7 +252,6 @@ let missionMetrics: MissionMetrics = {
 };
 let wasDamagedThisFare = false;
 let lastDamageWarningTime = 0;
-
 
 
 // ============================================================================
@@ -369,7 +373,7 @@ function findDestinationByDistance(origin: Vector3, targetDistance: number): Loc
     for (const loc of ImportantLocations) {
         const dist = getDistanceBetweenTwoVectors(origin, loc.coords);
         if (dist >= minRange && dist <= maxRange) {
-            candidates.push({ location: loc, distance: dist });
+            candidates.push({location: loc, distance: dist});
         }
     }
 
@@ -384,7 +388,7 @@ function findDestinationByDistance(origin: Vector3, targetDistance: number): Loc
     for (const loc of ImportantLocations) {
         const dist = getDistanceBetweenTwoVectors(origin, loc.coords);
         if (!closest || dist < closest.distance) {
-            closest = { location: loc, distance: dist };
+            closest = {location: loc, distance: dist};
         }
     }
 
@@ -409,44 +413,44 @@ function getDestination(origin: Vector3, targetDistance: number): Location | nul
     }
 }
 
- function getValidCarNode(point: Vector3): Vector3 | null {
-     const nodeResult = Path.GetNextClosestCarNode(point.x, point.y, point.z);
+function getValidCarNode(point: Vector3): Vector3 | null {
+    const nodeResult = Path.GetNextClosestCarNode(point.x, point.y, point.z);
 
-     if (nodeResult && (nodeResult.x !== 0 !== undefined)) {
-         return {
-             x: nodeResult.x || point.x,
-             y: nodeResult.y || point.y,
-             z: nodeResult.z || point.z,
-         };
-     }
+    if (nodeResult && (nodeResult.x !== 0 !== undefined)) {
+        return {
+            x: nodeResult.x || point.x,
+            y: nodeResult.y || point.y,
+            z: nodeResult.z || point.z,
+        };
+    }
 
-     debugEx("MOVEMENT", "GetNextClosestCarNode failed, trying fallback...");
+    debugEx("MOVEMENT", "GetNextClosestCarNode failed, trying fallback...");
 
-     const fallback = Path.GetClosestCarNode(point.x, point.y, point.z);
+    const fallback = Path.GetClosestCarNode(point.x, point.y, point.z);
 
-     if (fallback && fallback.pResX !== 0) {
-         debugEx("MOVEMENT", "Using GetClosestCarNode fallback");
-         return {
-             x: fallback.pResX,
-             y: fallback.pResY,
-             z: fallback.pResZ,
-         };
-     }
+    if (fallback && fallback.pResX !== 0) {
+        debugEx("MOVEMENT", "Using GetClosestCarNode fallback");
+        return {
+            x: fallback.pResX,
+            y: fallback.pResY,
+            z: fallback.pResZ,
+        };
+    }
 
-     const headingFallback = Path.GetClosestCarNodeWithHeading(point.x, point.y, point.z);
+    const headingFallback = Path.GetClosestCarNodeWithHeading(point.x, point.y, point.z);
 
-     if (headingFallback && headingFallback.pResX !== 0) {
-         debugEx("MOVEMENT", "Using GetClosestCarNodeWithHeading fallback");
-         return {
-             x: headingFallback.pResX,
-             y: headingFallback.pResY,
-             z: headingFallback.pResZ,
-         };
-     }
+    if (headingFallback && headingFallback.pResX !== 0) {
+        debugEx("MOVEMENT", "Using GetClosestCarNodeWithHeading fallback");
+        return {
+            x: headingFallback.pResX,
+            y: headingFallback.pResY,
+            z: headingFallback.pResZ,
+        };
+    }
 
-     debugEx("ERROR", "All path node methods failed");
-     return null;
- }
+    debugEx("ERROR", "All path node methods failed");
+    return null;
+}
 
 function calculateFare(distanceMeters: number): number {
     const adjustedDistance = Math.min(distanceMeters, MISSION_CONFIG.MAX_DISTANCE);
@@ -598,9 +602,9 @@ function requestAnimations(): void {
     const startWait = Date.now();
     while (
         // @ts-ignore
-        !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_M") ||
-        // @ts-ignore
-        !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_F")
+    !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_M") ||
+    // @ts-ignore
+    !native<boolean>("HAVE_ANIMS_LOADED", "AMB@TAXI_HAIL_F")
         ) {
         if (Date.now() - startWait > MISSION_CONFIG.ANIM_LOAD_TIMEOUT) {
             debugEx("ERROR", "Animation loading timeout");
@@ -754,7 +758,7 @@ function taxiMissionMainLoop(): void {
         return;
     }
 
-    if(missionData.passenger.isFatallyInjured() || missionData.passenger.isDead()) {
+    if (missionData.passenger.isFatallyInjured() || missionData.passenger.isDead()) {
         debugEx("ERROR", "Passenger died during pickup");
         endMissionEarly();
         return;
