@@ -4,7 +4,29 @@ CLEO_PLUGINS
 CLEO_TEXT
 !CLEO_TEXT/.gitkeep
 playground.ts
-reference
+#reference
 .kilocode
 .kilo
 AGENTS.ai.md
+
+# Visual Studio build outputs
+http_plugin/Debug/
+http_plugin/Release/
+http_plugin/http/Debug/
+http_plugin/http/Release/
+http_plugin/x64/
+http_plugin/ipch/
+*.ilk
+*.pdb
+*.obj
+*.tlog
+*.recipe
+*.idb
+*.iobj
+*.ipdb
+*.lastbuildstate
+*.suo
+*.user
+
+# Built plugin binaries (deploy separately)
+*.cleo
