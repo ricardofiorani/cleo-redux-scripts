@@ -11,8 +11,9 @@ import {getPedModelName, PedModel} from "./libs/models";
 import {loadModel} from "./libs/utils";
 
 let isActive = false;
+const SCRIPT_ENABLED = false;
 
-while (true) {
+while (SCRIPT_ENABLED) {
     wait(100);
     if (Pad.IsGameKeyboardKeyPressed(Key.Y)) {
         isActive = !isActive;
@@ -20,7 +21,8 @@ while (true) {
         let model: PedModel;
 
         if (isActive) {
-            model = PedModel.Cowboy1;
+            // model = PedModel.Cowboy1;
+            model = PedModel.Roman;
         } else {
             model = PedModel.NikoBellic;
         }

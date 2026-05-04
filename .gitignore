@@ -10,12 +10,12 @@ playground.ts
 AGENTS.ai.md
 
 # Visual Studio build outputs
-http_plugin/Debug/
-http_plugin/Release/
-http_plugin/http/Debug/
-http_plugin/http/Release/
-http_plugin/x64/
-http_plugin/ipch/
+plugins_source/http_plugin/Debug/
+plugins_source/http_plugin/Release/
+plugins_source/http_plugin/http/Debug/
+plugins_source/http_plugin/http/Release/
+plugins_source/http_plugin/x64/
+plugins_source/http_plugin/ipch/
 *.ilk
 *.pdb
 *.obj

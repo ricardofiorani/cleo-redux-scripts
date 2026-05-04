@@ -26,7 +26,7 @@ class HttpClient {
         log(`Request started with ID: ${requestId}`);
 
         while (!native("IS_HTTP_REQUEST_COMPLETE", requestId)) {
-            await asyncWait(100);
+            await asyncWait(0); //set to a higher value if stuttering
         }
 
         const body = this.readChunkedResponse(requestId);
@@ -65,7 +65,8 @@ let models = '';
 
             if (response.statusCode === 200) {
                 models = response.body;
-                log(models);
+                const parsedModels = JSON.parse(models);
+                log(`Total of ${parsedModels.models.length} models`);
             } else {
                 log(`HTTP error ${response.statusCode}: ${response.error}`);
                 models = '';
