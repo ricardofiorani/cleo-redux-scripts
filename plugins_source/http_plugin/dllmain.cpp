@@ -25,6 +25,7 @@ public:
         
         RegisterCommand("PING", Ping, "net");
         RegisterCommand("START_HTTP_REQUEST", StartHttpRequest, "net");
+        RegisterCommand("START_HTTP_REQUEST_EX", StartHttpRequestEx, "net");
         RegisterCommand("IS_HTTP_REQUEST_COMPLETE", HttpIsComplete, "net");
         RegisterCommand("GET_HTTP_RESPONSE", GetHttpResponse, "net");
         RegisterCommand("GET_HTTP_RESPONSE_CHUNK", GetHttpResponseChunk, "net");
@@ -53,6 +54,33 @@ public:
         SetIntParam(ctx, requestId);
         
         Log(("HTTP request started, ID: " + std::to_string(requestId)).c_str());
+        
+        return HandlerResult::CONTINUE;
+    }
+
+    // START_HTTP_REQUEST_EX(method, url, body, headers) -> returns request_id
+    static HandlerResult StartHttpRequestEx(Context ctx) {
+        char method[16];
+        char url[512];
+        char body[8192];
+        char headers[2048];
+        
+        GetStringParam(ctx, method, (unsigned char)15);
+        GetStringParam(ctx, url, (unsigned char)255);
+        GetStringParam(ctx, body, (unsigned char)255);
+        GetStringParam(ctx, headers, (unsigned char)255);
+        
+        int requestId = HttpRequestManager::Instance().StartRequest(
+            std::string(method), 
+            std::string(url), 
+            std::string(body), 
+            std::string(headers)
+        );
+        
+        UpdateCompareFlag(ctx, requestId > 0);
+        SetIntParam(ctx, requestId);
+        
+        Log(("HTTP " + std::string(method) + " request started, ID: " + std::to_string(requestId)).c_str());
         
         return HandlerResult::CONTINUE;
     }

@@ -12,6 +12,9 @@
 struct HttpRequest {
     int id;
     std::string url;
+    std::string method;
+    std::string body;
+    std::string headers;
     std::string response;
     std::string error;
     int statusCode;
@@ -29,6 +32,7 @@ public:
     }
 
     int StartRequest(const std::string& url);
+    int StartRequest(const std::string& method, const std::string& url, const std::string& body, const std::string& headers);
     bool IsComplete(int id);
     bool GetResponse(int id, std::string& outResponse, int& outStatusCode);
     bool GetResponseChunk(int id, int offset, int maxLen, std::string& chunk, int& bytesRead);
@@ -48,7 +52,7 @@ private:
     HttpRequestManager(const HttpRequestManager&) = delete;
     HttpRequestManager& operator=(const HttpRequestManager&) = delete;
 
-    void HttpWorkerThread(int id, const std::string& url);
+    void HttpWorkerThread(int id, const std::string& method, const std::string& url, const std::string& body, const std::string& headers);
     std::string ParseUrl(const std::string& url, bool& isSecure, std::string& host, int& port, std::string& path);
 
     std::map<int, std::shared_ptr<HttpRequest>> requests_;

@@ -2405,9 +2405,45 @@
           ],
           "name": "START_HTTP_REQUEST",
           "num_params": 2,
-          "short_desc": "Starts an async HTTP request, returns request ID",
+          "short_desc": "Starts an async HTTP GET request, returns request ID",
           "class": "Net",
           "member": "StartHttpRequest",
+          "attrs": {
+            "is_static": true,
+            "is_condition": true
+          }
+        },
+        {
+          "input": [
+            {
+              "name": "method",
+              "type": "string"
+            },
+            {
+              "name": "url",
+              "type": "string"
+            },
+            {
+              "name": "body",
+              "type": "string"
+            },
+            {
+              "name": "headers",
+              "type": "string"
+            }
+          ],
+          "output": [
+            {
+              "name": "requestId",
+              "type": "int",
+              "source": "var_any"
+            }
+          ],
+          "name": "START_HTTP_REQUEST_EX",
+          "num_params": 5,
+          "short_desc": "Starts an async HTTP request with method, body and headers (POST, PUT, DELETE, etc)",
+          "class": "Net",
+          "member": "StartHttpRequestEx",
           "attrs": {
             "is_static": true,
             "is_condition": true

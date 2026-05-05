@@ -31,3 +31,4 @@ plugins_source/http_plugin/ipch/
 
 # Built plugin binaries (deploy separately)
 *.cleo
+cartesia.apikey.json

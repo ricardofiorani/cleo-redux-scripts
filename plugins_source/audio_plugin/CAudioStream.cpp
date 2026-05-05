@@ -357,6 +357,17 @@ void CAudioStream::Play() {
     
     if (state == Stopped) BASS_ChannelSetPosition(streamInternal, 0, BASS_POS_BYTE);
     state = PlayingInactive;
+    
+    if (streamInternal && IsReady()) {
+        if (BASS_ChannelPlay(streamInternal, FALSE)) {
+            state = Playing;
+            Log("CAudioStream::Play: BASS_ChannelPlay succeeded");
+        } else {
+            char errMsg[256];
+            sprintf(errMsg, "CAudioStream::Play: BASS_ChannelPlay failed, error=%d", BASS_ErrorGetCode());
+            Log(errMsg);
+        }
+    }
 }
 
 void CAudioStream::Pause(bool changeState) {

@@ -3,19 +3,26 @@
 #include <algorithm>
 
 int HttpRequestManager::StartRequest(const std::string& url) {
+    return StartRequest("GET", url, "", "");
+}
+
+int HttpRequestManager::StartRequest(const std::string& method, const std::string& url, const std::string& body, const std::string& headers) {
     std::lock_guard<std::mutex> lock(mutex_);
     
     int id = nextId_++;
     auto req = std::make_shared<HttpRequest>();
     req->id = id;
     req->url = url;
+    req->method = method;
+    req->body = body;
+    req->headers = headers;
     req->statusCode = 0;
     req->started = true;
     req->completed = false;
     req->success = false;
     
     try {
-        req->workerThread = std::thread(&HttpRequestManager::HttpWorkerThread, this, id, url);
+        req->workerThread = std::thread(&HttpRequestManager::HttpWorkerThread, this, id, method, url, body, headers);
     } catch (const std::exception& e) {
         req->completed = true;
         req->success = false;
@@ -139,7 +146,7 @@ std::string HttpRequestManager::ParseUrl(const std::string& url, bool& isSecure,
     return host;
 }
 
-void HttpRequestManager::HttpWorkerThread(int id, const std::string& url) {
+void HttpRequestManager::HttpWorkerThread(int id, const std::string& method, const std::string& url, const std::string& body, const std::string& headers) {
     bool isSecure = false;
     std::string host;
     int port = 80;
@@ -180,8 +187,12 @@ void HttpRequestManager::HttpWorkerThread(int id, const std::string& url) {
         std::wstring wPath(pathLen, 0);
         MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &wPath[0], pathLen);
         
+        int methodLen = MultiByteToWideChar(CP_UTF8, 0, method.c_str(), -1, NULL, 0);
+        std::wstring wMethod(methodLen, 0);
+        MultiByteToWideChar(CP_UTF8, 0, method.c_str(), -1, &wMethod[0], methodLen);
+        
         DWORD flags = isSecure ? WINHTTP_FLAG_SECURE : 0;
-        hRequest = WinHttpOpenRequest(hConnect, L"GET", wPath.c_str(),
+        hRequest = WinHttpOpenRequest(hConnect, wMethod.c_str(), wPath.c_str(),
                                       NULL, WINHTTP_NO_REFERER,
                                       WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
         if (!hRequest) {
@@ -189,10 +200,30 @@ void HttpRequestManager::HttpWorkerThread(int id, const std::string& url) {
             break;
         }
         
-        if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
-            error = "WinHttpSendRequest failed: " + std::to_string(GetLastError());
-            break;
+        if (!headers.empty()) {
+            int headersLen = MultiByteToWideChar(CP_UTF8, 0, headers.c_str(), -1, NULL, 0);
+            std::wstring wHeaders(headersLen, 0);
+            MultiByteToWideChar(CP_UTF8, 0, headers.c_str(), -1, &wHeaders[0], headersLen);
+            
+            if (!WinHttpAddRequestHeaders(hRequest, wHeaders.c_str(), -1, WINHTTP_ADDREQ_FLAG_ADD)) {
+                error = "WinHttpAddRequestHeaders failed: " + std::to_string(GetLastError());
+                break;
+            }
+        }
+        
+        if (!body.empty()) {
+            int bodyLen = static_cast<int>(body.size());
+            if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                    (LPVOID)body.c_str(), bodyLen, bodyLen, 0)) {
+                error = "WinHttpSendRequest failed: " + std::to_string(GetLastError());
+                break;
+            }
+        } else {
+            if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                    WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
+                error = "WinHttpSendRequest failed: " + std::to_string(GetLastError());
+                break;
+            }
         }
         
         if (!WinHttpReceiveResponse(hRequest, NULL)) {
