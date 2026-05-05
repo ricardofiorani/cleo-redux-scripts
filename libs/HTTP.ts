@@ -8,13 +8,13 @@
 
 const isDebugEnabled = !!IniFile.ReadInt('http_config.ini','Network', 'debug');
 
-CLEO.debug.trace(isDebugEnabled);
+// CLEO.debug.trace(isDebugEnabled);
 
 export async function httpGet(url: string): Promise<string> {
     isDebugEnabled && log(`HTTP GET request to ${url}`);
 
     const wininet = DynamicLibrary.Load("wininet.dll");
-    wait(100);
+    await asyncWait(100);
     if (!wininet) throw new Error("wininet.dll not found");
     isDebugEnabled && log("Loaded wininet.dll");
 
@@ -158,12 +158,19 @@ export async function httpGet(url: string): Promise<string> {
     if (textDecoder) {
         const decodedString = textDecoder.decode(fullBuffer);
         isDebugEnabled && log(`Decoded string length: ${decodedString.length}`);
+        isDebugEnabled && log(`Returning decoded string length: ${decodedString.length}`);
+
         return decodedString;
     } else {
         // fallback
         const str = Array.from(fullBuffer).map(b => String.fromCharCode(b)).join("");
         isDebugEnabled && log(`Fallback decoded string length: ${str.length}`);
-        return str;
+        isDebugEnabled && log(`Returning undecoded string length: ${str.length}`);
+
+        const finalResult = str.toString();
+        isDebugEnabled && log(`Result:${finalResult}`);
+
+        return finalResult;
     }
 }
 

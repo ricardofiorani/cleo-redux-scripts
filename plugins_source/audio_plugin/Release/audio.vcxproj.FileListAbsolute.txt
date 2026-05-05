@@ -1,0 +1,1 @@
+C:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto IV\GTAIV\plugins\CLEO\plugins_source\audio_plugin\Release\audio.cleo

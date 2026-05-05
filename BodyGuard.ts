@@ -10,7 +10,6 @@
  *
  */
 
-import {Key} from ".config/enums";
 import {addVec, getDistanceBetweenTwoVectors} from "./libs/utils";
 import {giveCharWeapon, spawnChar, spawnCharInVehicle} from "./libs/char";
 import {RelationshipGroup, RelationshipType} from "./libs/relationship";
@@ -18,11 +17,14 @@ import {getPlayerChar, getPlayerCurrentVehicle, isPlayerInAnyVehicle} from "./li
 import {Weapons} from "./libs/weapons";
 import {addBlipForChar, BlipColors, removeBlipForChar} from "./libs/blips";
 import {getFreePassengerSeat} from "./libs/vehicle";
+import {Key} from ".config/gta_iv.enums";
 
 let group: Group;
 let garbageCollection: Char[] = [];
 
-while (true) {
+const SCRIPT_ENABLED = false;
+
+while (SCRIPT_ENABLED) {
     wait(100);
 
     if (!group) {
@@ -130,7 +132,7 @@ function spawnBodyguard() {
     log(`Bodyguard added to group, which now has ${group.getSize().pCount} members`);
 
     if (!currentVehicle) {
-        Task.FollowFootsteps(bodyguard, getPlayerChar() as int)
+        Task.FollowFootsteps(bodyguard, getPlayerChar())
     } else {
         Task.WarpCharIntoCarAsPassenger(bodyguard, currentVehicle, getFreePassengerSeat(currentVehicle));
     }
@@ -154,8 +156,10 @@ function makeGroupFollowPlayer() {
             wait(5000);
         })
     } else if (!isPlayerInAnyVehicle()) {
-        members.forEach(member => {
-            member.isInAnyCar() && Task.LeaveAnyCar(member) && wait(1000);
+        members.forEach((member) => {
+            member.isInAnyCar();
+            Task.LeaveAnyCar(member);
+            wait(1000);
         });
     }
 }

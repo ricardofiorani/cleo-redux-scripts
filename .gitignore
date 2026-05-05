@@ -1,10 +1,34 @@
-.config
+.config/*
+!.config/unknown_x86.json
 .idea
 CLEO_PLUGINS
 CLEO_TEXT
 !CLEO_TEXT/.gitkeep
 playground.ts
-reference
+#reference
 .kilocode
 .kilo
 AGENTS.ai.md
+
+# Visual Studio build outputs
+plugins_source/http_plugin/Debug/
+plugins_source/http_plugin/Release/
+plugins_source/http_plugin/http/Debug/
+plugins_source/http_plugin/http/Release/
+plugins_source/http_plugin/x64/
+plugins_source/http_plugin/ipch/
+*.ilk
+*.pdb
+*.obj
+*.tlog
+*.recipe
+*.idb
+*.iobj
+*.ipdb
+*.lastbuildstate
+*.suo
+*.user
+
+# Built plugin binaries (deploy separately)
+*.cleo
+cartesia.apikey.json
