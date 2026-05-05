@@ -32,35 +32,63 @@ namespace CLEO {
         if (initialized) return true;
 
         if (!BASSLoader::Instance().Load()) {
+            HMODULE hMod = BASSLoader::Instance().GetModule();
+            char logMsg[512];
+            sprintf(logMsg, "CSoundSystem::Init: BASSLoader::Load failed (module=%p)", hMod);
+            Log(logMsg);
             return false;
+        }
+
+        {
+            char dllPath[MAX_PATH];
+            GetModuleFileNameA(BASSLoader::Instance().GetModule(), dllPath, MAX_PATH);
+            char logMsg[512];
+            sprintf(logMsg, "CSoundSystem::Init: BASS DLL loaded from path=%s", dllPath);
+            Log(logMsg);
         }
 
         auto ver = HIWORD(BASS_GetVersion());
         if (ver < BASSVERSION) {
+            char logMsg[256];
+            sprintf(logMsg, "CSoundSystem::Init: BASS version too old: 0x%x < 0x%x", ver, BASSVERSION);
+            Log(logMsg);
             return false;
         }
 
         BASS_SetConfig(BASS_CONFIG_FLOATDSP, TRUE);
 
-        if (BASS_Init(-1, 44100, 0, NULL, NULL) &&
-            BASS_Set3DFactors(1.0f, 0.0f, 1.0f)) {
-
-            DWORD floatable = BASS_StreamCreate(44100, 1, BASS_SAMPLE_FLOAT, NULL, NULL);
-            if (floatable) {
-                useFloatAudio = true;
-                BASS_StreamFree(floatable);
-            }
-
-            if (BASS_GetInfo(&SoundDevice)) {
-                if (SoundDevice.flags & DSCAPS_EMULDRIVER) {
-                }
-            }
-
-            initialized = true;
-            return true;
+        if (!BASS_Init(-1, 44100, 0, NULL, NULL)) {
+            char logMsg[256];
+            sprintf(logMsg, "CSoundSystem::Init: BASS_Init failed, error=%d", BASS_ErrorGetCode());
+            Log(logMsg);
+            return false;
         }
 
-        return false;
+        if (!BASS_Set3DFactors(1.0f, 0.0f, 1.0f)) {
+            char logMsg[256];
+            sprintf(logMsg, "CSoundSystem::Init: BASS_Set3DFactors failed, error=%d", BASS_ErrorGetCode());
+            Log(logMsg);
+            return false;
+        }
+
+        DWORD floatable = BASS_StreamCreate(44100, 1, BASS_SAMPLE_FLOAT, NULL, NULL);
+        if (floatable) {
+            useFloatAudio = true;
+            BASS_StreamFree(floatable);
+        }
+
+        char logMsg[512];
+        sprintf(logMsg, "CSoundSystem::Init: BASS initialized, version=0x%x, floatAudio=%d", 
+               BASS_GetVersion(), useFloatAudio);
+        Log(logMsg);
+
+        if (BASS_GetInfo(&SoundDevice)) {
+            if (SoundDevice.flags & DSCAPS_EMULDRIVER) {
+            }
+        }
+
+        initialized = true;
+        return true;
     }
 
     bool CSoundSystem::Initialized() {
@@ -68,13 +96,19 @@ namespace CLEO {
     }
 
     CAudioStream* CSoundSystem::CreateStream(const char* filename, bool in3d) {
+        char logMsg[512];
+        sprintf(logMsg, "CSoundSystem::CreateStream: filename=%s, in3d=%d", filename, in3d);
+        Log(logMsg);
+        
         CAudioStream* result = in3d ? new C3DAudioStream(filename) : new CAudioStream(filename);
         if (!result->IsOk()) {
+            Log("CSoundSystem::CreateStream: Stream creation failed");
             delete result;
             return nullptr;
         }
 
         streams.insert(result);
+        Log("CSoundSystem::CreateStream: Stream created successfully");
         return result;
     }
 
@@ -137,6 +171,8 @@ namespace CLEO {
         for (auto stream : streams)
             stream->Process();
 
-        BASS_Apply3D();
+        if (initialized) {
+            BASS_Apply3D();
+        }
     }
 }

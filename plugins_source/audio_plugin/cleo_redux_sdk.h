@@ -46,6 +46,7 @@ typedef void (*OnTickCallback)(unsigned int current_time, int time_step);
 typedef void (*OnRuntimeInitCallback)();
 typedef void (*OnShowTextBoxCallback)(const char*);
 
+
 extern "C" {
 	long GetSDKVersion();
 	HostId GetHostId();

@@ -69,6 +69,9 @@ private:
         bool IsReady() const;
         HSTREAM GetInternal();
 
+        bool IsLoading() const { return isLoading; }
+        int GetDownloadId() const { return downloadId; }
+
         StreamState GetState() const;
         void Play();
         void Pause(bool changeState = true);

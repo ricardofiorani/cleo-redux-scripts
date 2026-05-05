@@ -27,6 +27,18 @@ let isPlaying = false;
                 log("Stream loaded, starting playback...");
                 native("SET_AUDIOSTREAM_STATE", streamHandle, 1);
                 isPlaying = true;
+
+
+                while(native("IS_AUDIOSTREAM_PLAYING", streamHandle)) {
+                    log("Waiting for stream to finish playback...");
+                    await asyncWait(100);
+                }
+
+                log("Audio stream finished playing, releasing...");
+                native("RELEASE_AUDIOSTREAM", streamHandle);
+                streamHandle = 0;
+                isPlaying = false;
+                log("Audio playback finished and stream released");
             } else {
                 log("Failed to start audio stream");
             }

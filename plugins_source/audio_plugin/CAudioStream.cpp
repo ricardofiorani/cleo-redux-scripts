@@ -351,11 +351,19 @@ void CALLBACK CAudioStream::DownloadCallback(const void *buffer, DWORD length, v
 }
 
 void CAudioStream::Play() {
+    char logMsg[256];
+    sprintf(logMsg, "CAudioStream::Play: state=%d", state);
+    Log(logMsg);
+    
     if (state == Stopped) BASS_ChannelSetPosition(streamInternal, 0, BASS_POS_BYTE);
     state = PlayingInactive;
 }
 
 void CAudioStream::Pause(bool changeState) {
+    char logMsg[256];
+    sprintf(logMsg, "CAudioStream::Pause: currentState=%d, changeState=%d", GetState(), changeState);
+    Log(logMsg);
+    
     if (GetState() == Playing) {
         BASS_ChannelPause(streamInternal);
         state = changeState ? Paused : PlayingInactive;
@@ -363,6 +371,8 @@ void CAudioStream::Pause(bool changeState) {
 }
 
 void CAudioStream::Stop() {
+    Log("CAudioStream::Stop called");
+    
     BASS_ChannelPause(streamInternal);
     state = Stopped;
     speed.finish();
@@ -507,6 +517,25 @@ void CAudioStream::Process() {
         if (DownloadManager::Instance().IsComplete(downloadId)) {
             if (DownloadManager::Instance().GetSuccess(downloadId)) {
                 Log("CAudioStream: Download complete, creating stream from temp file");
+
+                if (!BASSLoader::Instance().IsLoaded()) {
+                    Log("CAudioStream: BASS not loaded, attempting lazy init");
+                    if (!BASSLoader::Instance().Load()) {
+                        Log("CAudioStream: Lazy BASS load failed");
+                        ok = false;
+                        isLoading = false;
+                        return;
+                    }
+                    if (!BASS_Init(-1, 44100, 0, NULL, NULL)) {
+                        char logMsg[256];
+                        sprintf(logMsg, "CAudioStream: Lazy BASS_Init failed, error=%d", BASS_ErrorGetCode());
+                        Log(logMsg);
+                        ok = false;
+                        isLoading = false;
+                        return;
+                    }
+                    Log("CAudioStream: Lazy BASS init succeeded");
+                }
                 
                 unsigned flags = BASS_SAMPLE_SOFTWARE | BASS_STREAM_BLOCK;
                 if (CSoundSystem::useFloatAudio) flags |= BASS_SAMPLE_FLOAT;
@@ -515,10 +544,13 @@ void CAudioStream::Process() {
                 if (streamInternal) {
                     BASS_ChannelGetAttribute(streamInternal, BASS_ATTRIB_FREQ, &rate);
                     isLoading = false;
-                    state = PlayingInactive;
+                    state = Stopped;
                     Log("CAudioStream: Stream created successfully from downloaded file");
                 } else {
-                    Log("CAudioStream: ERROR - Failed to create stream from downloaded file");
+                    char logMsg[256];
+                    sprintf(logMsg, "CAudioStream: ERROR - Failed to create stream from downloaded file, error=%d",
+                        BASS_ErrorGetCode());
+                    Log(logMsg);
                     ok = false;
                     isLoading = false;
                 }

@@ -1,12 +1,8 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "cleo_redux_sdk.h"
-#include "bass.h"
 #include "CVector.h"
 #include "CSoundSystem.h"
 #include "CAudioStream.h"
-#include "C3DAudioStream.h"
-#include <string>
-#include <cstring>
 
 using namespace CLEO;
 
@@ -23,15 +19,32 @@ static HandlerResult IsAudioStreamLoaded(Context ctx) {
     STREAM_PARAM(stream);
     bool loaded = stream && stream->IsReady();
     char logMsg[512];
-    sprintf(logMsg, "IS_AUDIO_STREAM_LOADED: stream=%p, loaded=%s", stream, loaded ? "true" : "false");
+    bool downloadComplete = false;
+    int dlId = -1;
+    bool isLoading = false;
+    if (stream) {
+        dlId = stream->GetDownloadId();
+        isLoading = stream->IsLoading();
+        if (dlId >= 0) {
+            downloadComplete = DownloadManager::Instance().IsComplete(dlId);
+        }
+    }
+    sprintf(logMsg, "IS_AUDIO_STREAM_LOADED: stream=%p, loaded=%s, isLoading=%s, downloadId=%d, downloadComplete=%s",
+        stream, loaded ? "true" : "false",
+        isLoading ? "true" : "false",
+        dlId,
+        downloadComplete ? "true" : "false");
     Log(logMsg);
     UpdateCompareFlag(ctx, loaded);
     return HandlerResult::CONTINUE;
 }
 
 class AudioPlugin {
+    static bool s_firstTickLogged;
+
 public:
     AudioPlugin() {
+        Log("AudioPlugin: static ctor invoked");
         Log("CLEO Redux Audio Plugin 1.0 - Audio streaming using BASS");
 
         RegisterCommand("LOAD_AUDIOSTREAM", LoadAudioStream, "audio");
@@ -65,6 +78,7 @@ public:
 
         OnRuntimeInit(OnRuntimeInitCallback);
         OnAfterScripts(OnAfterScriptsCallback);
+        OnBeforeScripts(OnBeforeScriptsCallback);
     }
 
     static void OnRuntimeInitCallback() {
@@ -72,10 +86,20 @@ public:
         soundSystem.Init();
     }
 
-    static void OnAfterScriptsCallback(unsigned int current_time, int time_step) {
+    static void OnBeforeScriptsCallback(unsigned int current_time, int time_step) {
         if (soundSystem.Initialized()) {
             soundSystem.Process();
         }
+    }
+
+    static void OnAfterScriptsCallback(unsigned int current_time, int time_step) {
+        if (!s_firstTickLogged) {
+            char logMsg[256];
+            sprintf(logMsg, "AudioPlugin: first OnAfterScripts tick (init=%d)", soundSystem.Initialized());
+            Log(logMsg);
+            s_firstTickLogged = true;
+        }
+        soundSystem.Process();
     }
 
     static HandlerResult LoadAudioStream(Context ctx) {
@@ -85,6 +109,15 @@ public:
         char logMsg[512];
         sprintf(logMsg, "LOAD_AUDIOSTREAM: path = %s", path);
         Log(logMsg);
+
+        if (!soundSystem.Initialized()) {
+            Log("LOAD_AUDIOSTREAM: BASS not initialized, attempting lazy init");
+            if (!soundSystem.Init()) {
+                Log("LOAD_AUDIOSTREAM: Lazy init failed, stream may not work");
+            } else {
+                Log("LOAD_AUDIOSTREAM: Lazy init succeeded");
+            }
+        }
 
         char resolved[512];
         ResolvePath(path, resolved);
@@ -115,6 +148,15 @@ public:
         char logMsg[512];
         sprintf(logMsg, "LOAD_AUDIOSTREAM_FROM_URL: URL = %s", url);
         Log(logMsg);
+        
+        if (!soundSystem.Initialized()) {
+            Log("LOAD_AUDIOSTREAM_FROM_URL: BASS not initialized, attempting lazy init");
+            if (!soundSystem.Init()) {
+                Log("LOAD_AUDIOSTREAM_FROM_URL: Lazy init failed, download will proceed but stream creation may fail");
+            } else {
+                Log("LOAD_AUDIOSTREAM_FROM_URL: Lazy init succeeded");
+            }
+        }
         
         // Create stream using download-first approach
         auto ptr = soundSystem.CreateStreamFromUrl(url);
@@ -502,3 +544,5 @@ public:
     }
 
 } g_AudioPlugin;
+
+bool AudioPlugin::s_firstTickLogged = false;

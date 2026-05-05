@@ -1,4 +1,5 @@
-.config
+.config/*
+!.config/unknown_x86.json
 .idea
 CLEO_PLUGINS
 CLEO_TEXT

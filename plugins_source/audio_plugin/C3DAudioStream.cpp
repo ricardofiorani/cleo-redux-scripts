@@ -1,5 +1,7 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include "C3DAudioStream.h"
 #include "CSoundSystem.h"
+#include "cleo_redux_sdk.h"
 #include <algorithm>
 #undef max
 #undef min
@@ -9,6 +11,7 @@ using namespace CLEO;
 
 C3DAudioStream::C3DAudioStream(const char* filepath) : CAudioStream() {
     if (isNetworkSource(filepath) && !CSoundSystem::allowNetworkSources) {
+        Log("C3DAudioStream: Network sources disabled, returning");
         return;
     }
 
@@ -17,6 +20,9 @@ C3DAudioStream::C3DAudioStream(const char* filepath) : CAudioStream() {
 
     if (!(streamInternal = BASS_StreamCreateFile(FALSE, filepath, 0, 0, flags)) &&
         !(streamInternal = BASS_StreamCreateURL(filepath, 0, flags, nullptr, nullptr))) {
+        char logMsg[512];
+        sprintf(logMsg, "C3DAudioStream: Failed to create stream from %s", filepath);
+        Log(logMsg);
         return;
     }
 
@@ -24,16 +30,28 @@ C3DAudioStream::C3DAudioStream(const char* filepath) : CAudioStream() {
     BASS_ChannelSet3DAttributes(streamInternal, BASS_3DMODE_NORMAL, -1.0f, -1.0f, -1, -1, -1.0f);
     BASS_ChannelSetAttribute(streamInternal, BASS_ATTRIB_VOL, 0.0f);
     ok = true;
+    
+    char logMsg[512];
+    sprintf(logMsg, "C3DAudioStream: Created with filepath=%s, ok=%d", filepath, ok);
+    Log(logMsg);
 }
 
 void C3DAudioStream::Set3dPosition(const CVector& pos) {
     host = nullptr;
     hostType = 0;
     offset = pos;
+    
+    char logMsg[512];
+    sprintf(logMsg, "C3DAudioStream::Set3dPosition: pos=(%.2f,%.2f,%.2f)", pos.x, pos.y, pos.z);
+    Log(logMsg);
 }
 
 void C3DAudioStream::Set3dSourceSize(float radius) {
     this->radius = std::max<float>(radius, 0.01f);
+    
+    char logMsg[512];
+    sprintf(logMsg, "C3DAudioStream::Set3dSourceSize: radius=%.2f", radius);
+    Log(logMsg);
 }
 
 void C3DAudioStream::SetHost(void* host, int entityType, const CVector& offset) {
@@ -46,9 +64,19 @@ void C3DAudioStream::SetHost(void* host, int entityType, const CVector& offset) 
     }
 
     this->offset = offset;
+    
+    char logMsg[512];
+    sprintf(logMsg, "C3DAudioStream::SetHost: host=%p, entityType=%d, offset=(%.2f,%.2f,%.2f)", 
+           host, entityType, offset.x, offset.y, offset.z);
+    Log(logMsg);
 }
 
 void C3DAudioStream::Process() {
+    static int processCounter = 0;
+    if ((++processCounter % 100) == 0) {
+        Log("C3DAudioStream::Process called");
+    }
+    
     UpdatePosition();
     CAudioStream::Process();
 
